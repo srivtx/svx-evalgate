@@ -4,6 +4,18 @@ All notable changes to SVX EvalGate are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`AGENTS.md`** — onboarding context for AI coding agents and new
+  contributors: project intent, the six non-negotiable invariants
+  (determinism, interval-vs-interval comparison, direction-aware
+  gating, zero dependencies, exit-code contract, versioning
+  discipline), the verified command set, module map, testing gotchas,
+  deliberate design decisions, and the release process. Documentation
+  only — no code change, no version bump.
+
 ## [2.1.0] - 2026-09-12
 
 A maturing release: no contract breaks, no new statistics - the same
