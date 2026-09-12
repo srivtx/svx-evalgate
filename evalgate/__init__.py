@@ -17,18 +17,26 @@ v2 adds: latency and cost statistics (p50/p95, totals, bootstrap CIs),
 upper-bound thresholds for them, a self-contained HTML report with
 inline SVG charts, run history with `evalgate trend`, and direction-aware
 regression bands (lower-is-better metrics).
+
+v2.1 adds: JUnit XML output for CI test-report integrations (GitLab,
+Jenkins, Azure), pytest-JUnit ingestion (`evalgate ingest` - gate an
+existing test suite with zero emitter code), `evalgate diff` for
+snapshot comparisons, and per-case pass@k floors.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __all__ = [
+    "adapters",
     "baseline",
     "cli",
     "config",
+    "diff",
     "gate",
     "github",
     "history",
     "htmlreport",
     "init",
+    "junitxml",
     "report",
     "runner",
     "stats",

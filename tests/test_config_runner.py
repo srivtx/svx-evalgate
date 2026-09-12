@@ -293,3 +293,70 @@ class TestRunnerV2Fields:
         rows = runner_mod._parse_jsonl(stdout, "test")
         assert rows[0]["latency_ms"] is None
         assert rows[0]["cost_usd"] is None
+
+
+class TestV21Config:
+    """v2.1: junit_path + per-case pass@k floors."""
+
+    def test_junit_path_default_and_disable(self, tmp_path):
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text("evals:\n  command: x\n", encoding="utf-8")
+        cfg, _ = config_mod.load_config(p)
+        assert cfg.report.junit_path == ".svx/report.xml"
+        p.write_text("evals:\n  command: x\n"
+                     "report:\n  junit_path: ~\n", encoding="utf-8")
+        cfg, _ = config_mod.load_config(p)
+        assert cfg.report.junit_path is None
+
+    def test_case_floors_load_from_yaml(self, tmp_path):
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text(
+            "gate:\n"
+            "  case_min_pass_at_k:\n"
+            "    sql-join: 0.9\n"
+            "    translate: 0.75\n",
+            encoding="utf-8")
+        cfg, warnings = config_mod.load_config(p)
+        assert cfg.gate.case_min_pass_at_k == {"sql-join": 0.9, "translate": 0.75}
+        assert warnings == []
+
+    def test_case_floor_out_of_range_rejected(self, tmp_path):
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text("gate:\n  case_min_pass_at_k:\n    x: 1.5\n",
+                     encoding="utf-8")
+        with pytest.raises(ValueError, match="within \\[0, 1\\]"):
+            config_mod.load_config(p)
+
+    def test_case_floor_non_numeric_rejected(self, tmp_path):
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text("gate:\n  case_min_pass_at_k:\n    x: high\n",
+                     encoding="utf-8")
+        with pytest.raises(ValueError, match="must be a number"):
+            config_mod.load_config(p)
+
+    def test_case_floor_nested_too_deep_rejected(self, tmp_path):
+        # x maps to a dict, not a number -> clear error
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text("gate:\n  case_min_pass_at_k:\n    x:\n      min: 0.9\n",
+                     encoding="utf-8")
+        with pytest.raises(ValueError, match="must be a number"):
+            config_mod.load_config(p)
+
+    def test_config_hash_covers_case_floors(self, tmp_path):
+        from evalgate import config as config_mod
+        p = tmp_path / "svx.evalgate.yaml"
+        p.write_text("evals:\n  command: x\n", encoding="utf-8")
+        cfg, _ = config_mod.load_config(p)
+        base_hash = cfg.config_hash()
+        cfg.gate.case_min_pass_at_k = {"a": 0.9}
+        assert cfg.config_hash() != base_hash
+        # key order must not matter
+        cfg.gate.case_min_pass_at_k = {"a": 0.9, "b": 0.5}
+        h1 = cfg.config_hash()
+        cfg.gate.case_min_pass_at_k = {"b": 0.5, "a": 0.9}
+        assert cfg.config_hash() == h1

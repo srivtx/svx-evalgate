@@ -4,6 +4,52 @@ All notable changes to SVX EvalGate are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] - 2026-09-12
+
+A maturing release: no contract breaks, no new statistics - the same
+deterministic gate, speaking to more of the pipelines engineers already
+run. (Versioning note: minors add capabilities, patches fix them; a 3.0
+has to be earned in production first.)
+
+### Added
+
+- **JUnit XML output.** Every run writes `.svx/report.xml`
+  (`report.junit_path`, `~` disables): threshold checks under
+  `evalgate.gate`, regression checks under `evalgate.regression`,
+  per-case floors under `evalgate.cases`, with the statistical evidence
+  (intervals, bands, pass counts) inline in every `<failure>`. GitLab
+  `artifacts:reports:junit`, Jenkins, and Azure Pipelines render the
+  gate natively in their test tabs. See the new
+  [docs/gitlab-ci.md](docs/gitlab-ci.md) for a ready-to-paste pipeline
+  with baseline refresh on the default branch.
+- **`evalgate ingest --format pytest-junit PATH`** - gate an existing
+  pytest suite with zero wrapper code. Point it at pytest's built-in
+  `--junitxml` output: every test becomes a case, `<failure>`/`<error>`
+  become failed rows, `<skipped>` tests are dropped (a skip is the
+  absence of a data point), and durations become `latency_ms`. The
+  pipeline is identical to `evalgate run`: thresholds, regression
+  bands, all three reports, history, exit codes. DTD/entity
+  declarations are rejected at the parser door.
+- **`evalgate diff [A] [B]`** - compare two metric snapshots at the
+  command line. Defaults: baseline vs the last history entry; or name
+  two files (baseline documents or flat point-metrics JSON). Reuses
+  the gate's interval-vs-interval band logic: WORSE only when
+  confidently worse, direction-aware for latency and cost. Exit 1 when
+  anything is confidently worse - a cheap post-deploy smoke check.
+- **Per-case pass@k floors.** `gate.case_min_pass_at_k` maps case
+  names to minimum pass@k. A case below its floor is RED with its own
+  evidence line, JUnit testcase, and report row; a configured case
+  absent from the run produces a loud note (renames cannot silently
+  bypass a floor). Floors participate in `config_hash`, so refreshing
+  the baseline after adding one is recommended.
+
+### Changed
+
+- The YAML subset parser now documents (and relies on) arbitrary
+  nesting depth for the per-case mapping.
+- Tests: 193 -> 264, coverage 88% -> 92% (new in-process CLI tests
+  cover `run`/`ingest`/`diff`/`baseline`/`trend` end to end).
+
 ## [2.0.0] - 2026-09-12
 
 ### Added

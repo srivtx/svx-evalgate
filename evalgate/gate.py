@@ -19,8 +19,8 @@ LOWER_IS_BETTER = frozenset({"p95_latency_ms", "total_cost_usd"})
 
 @dataclass
 class MetricVerdict:
-    metric: str
-    kind: str          # "threshold" | "regression"
+    metric: str          # "pass_at_k_mean" | "case:<name>" | ...
+    kind: str            # "threshold" | "regression"
     current: float | None
     ci_low: float | None = None
     ci_high: float | None = None
@@ -31,6 +31,7 @@ class MetricVerdict:
     band: float | None = None          # for kind=regression
     status: str = NA
     detail: str = ""
+    case_name: str | None = None       # set for per-case threshold verdicts
 
 
 @dataclass
@@ -135,6 +136,32 @@ def evaluate(agg, config, baseline: dict | None) -> GateResult:
                 status=PASS if ok else FAIL,
                 detail=(f"total cost ${value:.4f} "
                         f"{'<=' if ok else '>'} max ${gate.max_total_cost_usd:.4f}"),
+            )
+            result.verdicts.append(v)
+            if not ok:
+                result.green = False
+
+    # --- per-case thresholds (v2.1): some cases matter more than others ---
+    if gate.case_min_pass_at_k:
+        case_lookup = {c.name: c for c in agg.cases}
+        for name in sorted(gate.case_min_pass_at_k):
+            threshold = gate.case_min_pass_at_k[name]
+            case = case_lookup.get(name)
+            if case is None:
+                result.notes.append(
+                    f"per-case threshold: case '{name}' is not present in "
+                    "this run (renamed? removed?) - check the case spelling"
+                )
+                continue
+            ok = case.pass_at_k >= threshold
+            v = MetricVerdict(
+                metric=f"case:{name}", kind="threshold",
+                current=case.pass_at_k, threshold=threshold,
+                status=PASS if ok else FAIL,
+                detail=(f"case '{name}': pass@{gate.k} {case.pass_at_k:.3f} "
+                        f"{'>=' if ok else '<'} required {threshold:.3f} "
+                        f"({case.passes}/{case.runs} runs passed)"),
+                case_name=name,
             )
             result.verdicts.append(v)
             if not ok:

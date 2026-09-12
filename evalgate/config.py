@@ -1,17 +1,19 @@
 """Config loading for EvalGate.
 
-Supports `svx.evalgate.yaml` (a flat two-level subset of YAML, parsed with
-a tiny in-tree parser so EvalGate has zero runtime dependencies) and
+Supports `svx.evalgate.yaml` (a flat subset of YAML, parsed with a tiny
+in-tree parser so EvalGate has zero runtime dependencies) and
 `svx.evalgate.json` (plain stdlib JSON). CLI flags override file values.
 
-The subset accepted: nested mappings (2-space indentation), scalar values
-(strings, ints, floats, true/false), `#` comments, blank lines. That is
-all the shipped schema needs; anything richer should use the JSON form.
+The subset accepted: nested mappings (2-space indentation, any depth),
+scalar values (strings, ints, floats, true/false), `#` comments, blank
+lines. That is all the shipped schema needs; anything richer should use
+the JSON form.
 """
 from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -120,6 +122,11 @@ class GateConfig:
     # v2 thresholds: RED when the current run EXCEEDS these (None = skip).
     max_p95_latency_ms: float | None = None
     max_total_cost_usd: float | None = None
+    # v2.1: per-case pass@k floors. Keys are case names exactly as the
+    # eval suite emits them; the aggregate min_pass_at_k still applies
+    # on top. A configured case absent from the run produces a note
+    # (never a silent pass).
+    case_min_pass_at_k: dict[str, float] = field(default_factory=dict)
     regression: RegressionConfig = field(default_factory=RegressionConfig)
 
 
@@ -136,6 +143,10 @@ class ReportConfig:
     # Set to null (~) to disable; written next to the markdown report
     # by default and attached to the run artifact.
     html_path: str | None = ".svx/report.html"
+    # JUnit XML for CI test-report integrations (v2.1): GitLab
+    # artifacts:reports:junit, Jenkins, Azure Pipelines, GitHub
+    # test-annotation actions. Set to null (~) to disable.
+    junit_path: str | None = ".svx/report.xml"
 
 
 @dataclass
@@ -167,6 +178,7 @@ class Config:
             "min_mean_score": self.gate.min_mean_score,
             "max_p95_latency_ms": self.gate.max_p95_latency_ms,
             "max_total_cost_usd": self.gate.max_total_cost_usd,
+            "case_min_pass_at_k": dict(sorted(self.gate.case_min_pass_at_k.items())),
             "regression": dataclasses.asdict(self.gate.regression),
         }
         blob = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -235,4 +247,21 @@ def load_config(path: Path) -> tuple[Config, list[str]]:
         raise ValueError("gate.max_total_cost_usd must be > 0")
     if cfg.history.max_entries < 1:
         raise ValueError("history.max_entries must be >= 1")
+    if not isinstance(cfg.gate.case_min_pass_at_k, dict):
+        raise ValueError("gate.case_min_pass_at_k must be a mapping of "
+                         "case name -> minimum pass@k")
+    for name, value in cfg.gate.case_min_pass_at_k.items():
+        if not name or not isinstance(name, str):
+            raise ValueError("gate.case_min_pass_at_k keys must be non-empty "
+                             "case names")
+        try:
+            floor = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"gate.case_min_pass_at_k['{name}'] must be a number in [0, 1]"
+            ) from exc
+        if not math.isfinite(floor) or not 0.0 <= floor <= 1.0:
+            raise ValueError(
+                f"gate.case_min_pass_at_k['{name}'] must be within [0, 1]")
+        cfg.gate.case_min_pass_at_k[name] = floor
     return cfg, warnings

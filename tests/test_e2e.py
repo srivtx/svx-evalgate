@@ -318,3 +318,180 @@ class TestV2Pipeline:
         # html still renders, with empty trend
         html = (project_v2 / ".svx" / "report.html").read_text(encoding="utf-8")
         assert "first run on record" in html
+
+
+PYTEST_JUNIT_REPORT = textwrap.dedent(
+    """\
+    <?xml version="1.0" encoding="utf-8"?>
+    <testsuites name="pytest" tests="3" failures="0">
+      <testsuite name="tests.test_llm" tests="3" time="0.5">
+        <testcase classname="tests.test_llm" name="test_sql_gen" time="0.2"/>
+        <testcase classname="tests.test_llm" name="test_sql_join" time="0.2"/>
+        <testcase classname="tests.test_llm" name="test_extract" time="0.1"/>
+      </testsuite>
+    </testsuites>
+    """
+)
+
+PYTEST_JUNIT_FAILING = textwrap.dedent(
+    """\
+    <?xml version="1.0" encoding="utf-8"?>
+    <testsuites name="pytest" tests="3" failures="2">
+      <testsuite name="tests.test_llm" tests="3" time="0.5">
+        <testcase classname="tests.test_llm" name="test_sql_gen" time="0.2"/>
+        <testcase classname="tests.test_llm" name="test_sql_join" time="0.2">
+          <failure message="assert False">wrong join</failure>
+        </testcase>
+        <testcase classname="tests.test_llm" name="test_extract" time="0.1">
+          <error message="boom">ConnectionError</error>
+        </testcase>
+      </testsuite>
+    </testsuites>
+    """
+)
+
+
+class TestV21Pipeline:
+    def test_run_writes_junit_xml_by_default(self, project_v2):
+        proc = _evalgate(project_v2, "run", "--update-baseline")
+        assert proc.returncode == 0, proc.stderr
+        junit_file = project_v2 / ".svx" / "report.xml"
+        assert junit_file.exists()
+        import xml.etree.ElementTree as ET
+        root = ET.parse(junit_file).getroot()
+        suite = root.find("testsuite")
+        assert int(suite.get("failures")) == 0
+
+    def test_junit_disabled_with_null(self, project_v2):
+        cfg = project_v2 / "svx.evalgate.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8") +
+                       "report:\n  junit_path: ~\n", encoding="utf-8")
+        proc = _evalgate(project_v2, "run")
+        assert proc.returncode == 0, proc.stderr
+        assert not (project_v2 / ".svx" / "report.xml").exists()
+
+    def test_ingest_green_path(self, project_v2):
+        report = project_v2 / "pytest-report.xml"
+        report.write_text(PYTEST_JUNIT_REPORT, encoding="utf-8")
+        proc = _evalgate(project_v2, "ingest", "pytest-report.xml",
+                         "--update-baseline", "--json")
+        assert proc.returncode == 0, proc.stderr
+        assert "ingested 3 row(s)" in proc.stderr
+        doc = json.loads(proc.stdout)
+        assert doc["green"] is True
+        assert doc["total_runs"] == 3
+        assert doc["metrics"]["p95_latency_ms"] == 200.0
+        # baseline + reports written like any run
+        assert (project_v2 / ".svx" / "baseline.json").exists()
+        assert (project_v2 / ".svx" / "report.md").exists()
+        assert (project_v2 / ".svx" / "report.html").exists()
+        assert (project_v2 / ".svx" / "report.xml").exists()
+        # the report notes the ingestion source
+        markdown = (project_v2 / ".svx" / "report.md").read_text(encoding="utf-8")
+        assert "ingested from pytest-junit" in markdown
+
+    def test_ingest_then_ingest_gates_against_baseline(self, project_v2):
+        report = project_v2 / "pytest-report.xml"
+        report.write_text(PYTEST_JUNIT_REPORT, encoding="utf-8")
+        _evalgate(project_v2, "ingest", "pytest-report.xml", "--update-baseline")
+        # identical report: must stay green (no false regression)
+        proc = _evalgate(project_v2, "ingest", "pytest-report.xml")
+        assert proc.returncode == 0, proc.stderr
+
+    def test_ingest_failing_report_is_red(self, project_v2):
+        report = project_v2 / "pytest-report.xml"
+        report.write_text(PYTEST_JUNIT_REPORT, encoding="utf-8")
+        _evalgate(project_v2, "ingest", "pytest-report.xml", "--update-baseline")
+        failing = project_v2 / "failing.xml"
+        failing.write_text(PYTEST_JUNIT_FAILING, encoding="utf-8")
+        proc = _evalgate(project_v2, "ingest", "failing.xml")
+        assert proc.returncode == 1, proc.stderr
+        assert "verdict: RED" in proc.stderr
+        import xml.etree.ElementTree as ET
+        root = ET.parse(project_v2 / ".svx" / "report.xml").getroot()
+        assert int(root.find("testsuite").get("failures")) > 0
+
+    def test_ingest_missing_file_is_clean_error(self, project_v2):
+        proc = _evalgate(project_v2, "ingest", "no-such-report.xml")
+        assert proc.returncode == 2
+        assert "not found" in proc.stderr
+
+    def test_ingest_bad_format_rejected(self, project_v2):
+        report = project_v2 / "report.xml"
+        report.write_text(PYTEST_JUNIT_REPORT, encoding="utf-8")
+        proc = _evalgate(project_v2, "ingest", "--format", "cobertura",
+                         "report.xml")
+        assert proc.returncode == 2  # argparse choices rejection
+
+    def test_diff_default_baseline_vs_last_run(self, project_v2):
+        _evalgate(project_v2, "run", "--update-baseline")
+        proc = _evalgate(project_v2, "run")
+        assert proc.returncode == 0, proc.stderr
+        proc = _evalgate(project_v2, "diff")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "A: baseline" in proc.stdout
+        assert "B: last run" in proc.stdout
+        assert "no metric is confidently worse" in proc.stdout
+
+    def test_diff_flags_confident_regression(self, project_v2):
+        _evalgate(project_v2, "run", "--update-baseline")
+        proc = _evalgate(project_v2, "run",
+                         env_extra={"DEMO_MODE": "regression"})
+        assert proc.returncode == 1, proc.stderr
+        proc = _evalgate(project_v2, "diff")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "confidently worse" in proc.stdout
+
+    def test_diff_two_explicit_snapshots(self, project_v2):
+        _evalgate(project_v2, "run", "--update-baseline")
+        import shutil
+        a = project_v2 / "snapshot-a.json"
+        shutil.copy(project_v2 / ".svx" / "baseline.json", a)
+        proc = _evalgate(project_v2, "run",
+                         env_extra={"DEMO_MODE": "regression"})
+        assert proc.returncode == 1
+        b = project_v2 / "snapshot-b.json"
+        shutil.copy(project_v2 / ".svx" / "baseline.json", b)  # same content
+        proc = _evalgate(project_v2, "diff", "snapshot-a.json", "snapshot-b.json")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "snapshot-a.json" in proc.stdout
+
+    def test_diff_no_history_no_baseline_is_clean_error(self, project_v2):
+        proc = _evalgate(project_v2, "diff")
+        assert proc.returncode == 2
+        assert "no baseline" in proc.stderr
+
+    def test_per_case_floor_trips_red(self, project_v2):
+        # rewrite the gate block with an unreachable per-case floor
+        cfg = project_v2 / "svx.evalgate.yaml"
+        cfg.write_text(textwrap.dedent(
+            """
+            evals:
+              command: "python evals/run_evals.py"
+              repetitions: 16
+              base_seed: 555001
+              bootstrap_iterations: 1500
+
+            gate:
+              k: 1
+              min_pass_at_k: 0.80
+              case_min_pass_at_k:
+                sql-gen-join: 1.0
+                summarize-faithful: 1.0
+                extract-entities: 1.0
+
+            baseline:
+              auto_write_on_missing: false
+            """
+        ), encoding="utf-8")
+        # floors of 1.0 trip on the first flake of any of the three
+        # cases; the seeded mock flakes on at least one of them under
+        # every CPython that runs this suite (RNG streams differ by
+        # version, but none of them makes all three cases perfect).
+        proc = _evalgate(project_v2, "run")
+        assert proc.returncode == 1, proc.stderr
+        assert "case 'sql-gen-join'" in proc.stderr or \
+               "case 'summarize-faithful'" in proc.stderr or \
+               "case 'extract-entities'" in proc.stderr
+        markdown = (project_v2 / ".svx" / "report.md").read_text(encoding="utf-8")
+        assert "min 1.000" in markdown

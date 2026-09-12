@@ -66,3 +66,19 @@ jobs:
           test -f .svx/report.html
           test -f .svx/history.jsonl
           evalgate trend --limit 3
+
+      - name: 'Self-check: v2.1 artifacts (junit xml + diff)'
+        working-directory: examples/llm-app
+        run: |
+          test -f .svx/report.xml
+          python -c "import xml.etree.ElementTree as ET; ET.parse('.svx/report.xml')"
+          # diff must run cleanly (exit 2 = usage/error is a failure);
+          # exit 1 is a legitimate confidently-worse verdict.
+          set +e
+          evalgate diff
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then
+            echo "expected exit 0 or 1 from evalgate diff, got $code"
+            exit 1
+          fi

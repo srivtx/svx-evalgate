@@ -12,6 +12,9 @@ gate:
   min_pass_at_k: 0.80                    # aggregate threshold (mean of per-case pass@k)
   min_mean_score: 0.60
   max_p95_latency_ms: 1200               # v2: RED when p95 latency exceeds this
+  case_min_pass_at_k:                    # v2.1: per-case floors
+    sql-gen-basic: 0.90                  # the flagship query must be rock solid
+    sql-gen-window: 0.75                 # window functions are allowed to flake
   regression:
     mode: absolute                       # "absolute" or "relative" (fraction of baseline)
     tolerance: 0.04                      # band around the baseline before a run goes red
@@ -22,3 +25,4 @@ baseline:
 
 report:
   path: .svx/report.md
+  junit_path: .svx/report.xml            # v2.1: JUnit XML for CI test reports

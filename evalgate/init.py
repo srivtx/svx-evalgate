@@ -30,6 +30,7 @@ baseline:
 report:
   path: .svx/report.md
   html_path: .svx/report.html   # self-contained SVG report (set ~ to skip)
+  junit_path: .svx/report.xml   # JUnit XML for CI test reports (~ to skip)
 
 history:                     # v2: run log behind `evalgate trend`
   enabled: true
@@ -42,6 +43,9 @@ gate:
   min_mean_score: 0.60      # optional threshold on mean score (delete to skip)
   # max_p95_latency_ms: 1500   # v2: RED when p95 latency exceeds this
   # max_total_cost_usd: 1.00   # v2: RED when total run cost exceeds this
+  # v2.1: per-case floors - some cases matter more than the aggregate.
+  # case_min_pass_at_k:
+  #   sql-join: 0.90
   regression:
     mode: absolute          # "absolute" or "relative" (fraction of baseline)
     tolerance: 0.04         # band before a run is confidently RED

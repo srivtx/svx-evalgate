@@ -328,3 +328,62 @@ class TestDirectionAwareRegression:
             "pass_at_k_mean": {"value": 0.9, "low": 0.88, "high": 0.92}}}
         result = gate_mod.evaluate(agg, _cfg_v2(), baseline=baseline)
         assert not any(v.metric == "p95_latency_ms" for v in result.verdicts)
+
+
+class TestCaseThresholds:
+    """v2.1: per-case pass@k floors."""
+
+    def _agg(self, qualities, reps=10):
+        from evalgate import stats as stats_mod
+        rows = []
+        for name, quality in qualities:
+            for i in range(reps):
+                rows.append({"case": name, "passed": (i / reps) < quality})
+        return stats_mod.aggregate(rows, k=1, base_seed=7)
+
+    def _cfg(self, floors):
+        from evalgate import config as config_mod
+        return config_mod.Config(
+            gate=config_mod.GateConfig(
+                k=1, min_pass_at_k=0.0, case_min_pass_at_k=floors),
+        )
+
+    def test_case_above_floor_passes(self):
+        agg = self._agg([("a", 1.0), ("b", 0.5)])
+        result = gate_mod.evaluate(agg, self._cfg({"a": 0.9, "b": 0.4}), None)
+        assert result.green
+        case_verdicts = [v for v in result.verdicts if v.case_name]
+        assert {v.case_name for v in case_verdicts} == {"a", "b"}
+        assert all(v.status == gate_mod.PASS for v in case_verdicts)
+
+    def test_case_below_floor_fails(self):
+        agg = self._agg([("a", 0.5)])
+        result = gate_mod.evaluate(agg, self._cfg({"a": 0.9}), None)
+        assert not result.green
+        v = next(x for x in result.verdicts if x.case_name)
+        assert v.case_name == "a"
+        assert v.status == gate_mod.FAIL
+        assert "required 0.900" in v.detail
+        assert v.metric == "case:a"
+
+    def test_missing_case_produces_note_not_failure(self):
+        agg = self._agg([("a", 1.0)])
+        result = gate_mod.evaluate(agg, self._cfg({"ghost-case": 0.9}), None)
+        assert result.green  # note, never a silent fail
+        assert any("ghost-case" in n and "not present" in n
+                   for n in result.notes)
+        assert not any(v.case_name == "ghost-case" for v in result.verdicts)
+
+    def test_aggregate_still_applies_on_top(self):
+        # every case meets its floor but the aggregate mean does not
+        agg = self._agg([("a", 0.6), ("b", 0.6)])
+        cfg = self._cfg({"a": 0.5, "b": 0.5})
+        cfg.gate.min_pass_at_k = 0.8
+        result = gate_mod.evaluate(agg, cfg, None)
+        assert not result.green
+
+    def test_verdict_order_is_deterministic(self):
+        agg = self._agg([("b", 1.0), ("a", 1.0), ("c", 1.0)])
+        result = gate_mod.evaluate(agg, self._cfg({"c": 0.5, "a": 0.5, "b": 0.5}), None)
+        names = [v.case_name for v in result.verdicts if v.case_name]
+        assert names == ["a", "b", "c"]  # sorted, not insertion-ordered

@@ -154,3 +154,36 @@ statistics; case names are HTML-escaped (the test suite feeds it
 script-tag and attribute-injection payloads); numbers use tabular
 figures. The only non-deterministic string anywhere in the file is the
 generation timestamp in the footer.
+
+## Reusing the comparison: diff and per-case floors (v2.1)
+
+Two v2.1 surfaces reuse the same interval-vs-interval machinery rather
+than inventing new statistics, which matters because every comparison
+in EvalGate must give the same answer for the same numbers.
+
+`evalgate diff [A] [B]` compares two snapshots - baseline documents
+(value, low, high per metric) or flat point documents (history entries,
+which degrade to degenerate intervals). WORSE means exactly what
+REGRESSION means in the gate: the compared interval sits entirely
+beyond the reference interval plus the configured band, in the
+direction that is worse for that metric. A history entry without
+intervals is a point, so a point-vs-interval comparison needs the full
+band to clear before it can be called WORSE - consistent with how the
+gate treats pre-v2 baselines.
+
+Per-case floors (`gate.case_min_pass_at_k`) are point-estimate
+threshold checks, deliberately not interval checks: per-case sample
+sizes are small (a case with 20 runs has a Wilson interval wide enough
+to hide real regressions), and a floor is an engineering requirement -
+"this case must pass at least 95% of the time" - not a statistical
+claim about a distribution. The aggregate `min_pass_at_k` and the
+regression bands continue to carry the statistical burden. Floors
+enter `config_hash` so a baseline recorded under different floors is
+flagged as stale.
+
+The JUnit XML adapter is a projection, not a computation: every
+MetricVerdict becomes one testcase (classname `evalgate.gate`,
+`evalgate.regression`, or `evalgate.cases`), and FAIL/REGRESSION
+verdicts carry the verdict's evidence text inside the `<failure>`
+element. Nothing statistical happens at projection time, so the XML
+cannot disagree with the markdown, the HTML, or the exit code.

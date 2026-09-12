@@ -1,9 +1,9 @@
 {
   "base_seed": 777001,
   "cases": 10,
-  "config_hash": "829b6af0ec9684ce",
-  "created": "2026-09-12T11:31:35+00:00",
-  "git_sha": "12d5e64d639f762a09c87908f5c61100477634ca",
+  "config_hash": "ec8e6ab8b3e6a590",
+  "created": "2026-09-12T12:06:00+00:00",
+  "git_sha": "9807a46b01cbac1077ca5bbcc1af8978a6320cff",
   "metrics": {
     "mean_score": {
       "high": 0.927679,

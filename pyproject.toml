@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "svx-evalgate"
-version = "2.0.0"
+version = "2.1.0"
 description = "SVX EvalGate - deterministic statistics gate for AI evals in CI: pass@k, bootstrap confidence intervals, latency and cost statistics, regression bands against stored baselines, and a self-contained HTML report. Green or red on your pull request."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -99,3 +99,145 @@ class TestParser:
         assert cli.main([]) == cli.EXIT_ERROR
         out = capsys.readouterr().out
         assert "run" in out and "trend" in out
+
+
+PYTEST_XML = """<?xml version="1.0"?>
+<testsuites>
+  <testsuite name="t" tests="2">
+    <testcase classname="t" name="a" time="0.1"/>
+    <testcase classname="t" name="b" time="0.2"/>
+  </testsuite>
+</testsuites>
+"""
+
+
+def _write_config(tmp_path, extra=""):
+    (tmp_path / "svx.evalgate.yaml").write_text(
+        "evals:\n"
+        "  command: \"python emit.py\"\n"
+        "  repetitions: 2\n"
+        "  base_seed: 11\n"
+        "  bootstrap_iterations: 100\n"
+        "gate:\n"
+        "  k: 1\n"
+        "  min_pass_at_k: 0.5\n"
+        "report:\n"
+        "  html_path: ~\n"
+        "  junit_path: .svx/report.xml\n"
+        + extra,
+        encoding="utf-8")
+    (tmp_path / "emit.py").write_text(
+        "import json\n"
+        "for i in range(2):\n"
+        "    print(json.dumps({'case': 'c%d' % i, 'passed': True}))\n",
+        encoding="utf-8")
+
+
+class TestCliDirect:
+    """In-process CLI coverage: main() with argv, no subprocess wrapping."""
+
+    def test_run_pipeline_direct(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["run", "--update-baseline", "--json"]) == 0
+        out = capsys.readouterr()
+        doc = __import__("json").loads(out.out)
+        assert doc["green"] is True
+        assert (tmp_path / ".svx" / "baseline.json").exists()
+        assert (tmp_path / ".svx" / "report.md").exists()
+        assert (tmp_path / ".svx" / "report.xml").exists()
+        assert not (tmp_path / ".svx" / "report.html").exists()  # disabled
+
+    def test_run_missing_config_exits(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):
+            cli.main(["run"])
+
+    def test_ingest_direct_green(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        (tmp_path / "r.xml").write_text(PYTEST_XML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["ingest", "r.xml", "--update-baseline",
+                         "--report-stdout"]) == 0
+        out = capsys.readouterr()
+        assert "ingested 2 row(s)" in out.err
+        assert "ingested from pytest-junit" in out.out  # markdown on stdout
+
+    def test_ingest_missing_source_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["ingest", "ghost.xml"]) == cli.EXIT_ERROR
+
+    def test_ingest_no_source_arg_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(SystemExit):  # argparse: source is required
+            cli.main(["ingest"])
+
+    def test_ingest_bad_xml_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        (tmp_path / "bad.xml").write_text("<oops", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["ingest", "bad.xml"]) == cli.EXIT_ERROR
+
+    def test_diff_default_after_runs(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        (tmp_path / "r.xml").write_text(PYTEST_XML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        cli.main(["ingest", "r.xml", "--update-baseline"])
+        cli.main(["ingest", "r.xml"])
+        assert cli.main(["diff"]) == 0
+        out = capsys.readouterr()
+        assert "no metric is confidently worse" in out.out
+
+    def test_diff_explicit_files(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        (tmp_path / "r.xml").write_text(PYTEST_XML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        cli.main(["ingest", "r.xml", "--update-baseline"])
+        import shutil
+        shutil.copy(tmp_path / ".svx" / "baseline.json", tmp_path / "a.json")
+        shutil.copy(tmp_path / ".svx" / "baseline.json", tmp_path / "b.json")
+        assert cli.main(["diff", "a.json", "b.json"]) == 0
+
+    def test_diff_no_baseline_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["diff"]) == cli.EXIT_ERROR
+
+    def test_diff_missing_file_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        (tmp_path / "r.xml").write_text(PYTEST_XML, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        cli.main(["ingest", "r.xml", "--update-baseline"])
+        assert cli.main(["diff", "ghost.json"]) == cli.EXIT_ERROR
+
+    def test_diff_bad_snapshot_error(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        (tmp_path / "bad.json").write_text("{nope", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["diff", "bad.json", "bad.json"]) == cli.EXIT_ERROR
+
+    def test_baseline_show_and_reset_direct(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        cli.main(["run", "--update-baseline"])
+        assert cli.main(["baseline"]) == 0
+        assert '"metrics"' in capsys.readouterr().out
+        assert cli.main(["baseline", "reset"]) == 0
+        assert cli.main(["baseline"]) == cli.EXIT_ERROR  # gone now
+
+    def test_trend_direct(self, tmp_path, monkeypatch, capsys):
+        _write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["trend"]) == cli.EXIT_ERROR  # no history yet
+        cli.main(["run"])
+        assert cli.main(["trend", "--limit", "1"]) == 0
+        assert "last 1 of 1 run(s)" in capsys.readouterr().out
+
+    def test_runner_error_maps_to_exit_2(self, tmp_path, monkeypatch):
+        _write_config(tmp_path)
+        (tmp_path / "emit.py").write_text("import sys; sys.exit(3)\n",
+                                         encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert cli.main(["run"]) == cli.EXIT_ERROR

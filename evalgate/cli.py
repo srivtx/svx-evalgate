@@ -1,12 +1,25 @@
 """EvalGate command-line interface.
 
     evalgate run [--config PATH] [--update-baseline] [--report-stdout] [--json]
+    evalgate ingest --format pytest-junit PATH [--config PATH]
+                    [--update-baseline] [--report-stdout] [--json]
+    evalgate diff [A] [B] [--config PATH]
     evalgate baseline [show|reset] [--config PATH]
     evalgate trend [--config PATH] [--limit N]
     evalgate init [DIR]                        # scaffold a gated eval suite
     evalgate version
 
-Exit codes: 0 = green, 1 = red (threshold or regression), 2 = error.
+`run` executes the configured eval command; `ingest` reads an existing
+test report (pytest's built-in JUnit XML) instead - zero emitter code.
+Both share the same pipeline: aggregate statistics, thresholds,
+regression bands, baseline management, and the markdown/HTML/JUnit
+reports.
+
+`diff` compares two metric snapshots (baseline documents or history
+entries): `evalgate diff` is baseline-vs-last-run, `evalgate diff A`
+is baseline-vs-A, `evalgate diff A B` compares two snapshot files.
+Exit codes: 0 = green, 1 = red (threshold, regression, or confidently
+worse in a diff), 2 = error.
 """
 from __future__ import annotations
 
@@ -17,13 +30,16 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import adapters as adapters_mod
 from . import baseline as baseline_mod
 from . import config as config_mod
+from . import diff as diff_mod
 from . import gate as gate_mod
 from . import github as github_mod
 from . import history as history_mod
 from . import htmlreport as htmlreport_mod
 from . import init as init_mod
+from . import junitxml as junitxml_mod
 from . import report as report_mod
 from . import runner as runner_mod
 from . import stats as stats_mod
@@ -51,32 +67,13 @@ def _resolve_config(args) -> tuple[config_mod.Config, list[str], Path]:
     return cfg, warnings, path
 
 
-def cmd_run(args) -> int:
-    cfg, _warnings, _cfg_path = _resolve_config(args)
-
+def _gate_pipeline(cfg, rows: list[dict], args, source_note: str | None = None) -> int:
+    """Shared run/ingest tail: stats -> gate -> reports -> exit code."""
     assert cfg.source_path is not None
     base_dir = cfg.source_path.parent
-    workdir = base_dir
-    if cfg.evals.working_dir:
-        candidate = Path(cfg.evals.working_dir)
-        workdir = candidate if candidate.is_absolute() else (base_dir / candidate)
-
-    # Pass a curated environment to the eval command: PR context variables
-    # do not leak into child processes (keeps eval output reproducible).
-    passthrough = {}
-    for var in ("DEMO_MODE",):
-        if var in os.environ:
-            passthrough[var] = os.environ[var]
-
-    _log(f"running '{cfg.evals.command}' x{cfg.evals.repetitions} "
-         f"(base seed {cfg.evals.base_seed}, cwd {workdir})")
-    outcome = runner_mod.run_evals(
-        cfg.evals.command, cfg.evals.repetitions, cfg.evals.base_seed,
-        workdir, extra_env=passthrough,
-    )
 
     agg = stats_mod.aggregate(
-        outcome.rows, k=cfg.gate.k, base_seed=cfg.evals.base_seed,
+        rows, k=cfg.gate.k, base_seed=cfg.evals.base_seed,
         bootstrap_iterations=cfg.evals.bootstrap_iterations,
     )
 
@@ -87,8 +84,10 @@ def cmd_run(args) -> int:
              f"(created {baseline.get('created', '?')})")
 
     gate_result = gate_mod.evaluate(agg, cfg, baseline)
+    if source_note:
+        gate_result.notes.insert(0, source_note)
 
-    # history first (v2): the HTML trend chart includes the current run
+    # history first: the HTML trend chart includes the current run
     hpath = history_mod.history_path(cfg)
     history_entries: list[dict] = []
     if cfg.history.enabled:
@@ -112,6 +111,14 @@ def cmd_run(args) -> int:
             htmlreport_mod.render(agg, cfg, baseline, gate_result, history_entries),
             html_path)
         _log(f"html report: {html_path}")
+
+    if cfg.report.junit_path:
+        junit_path = (base_dir / cfg.report.junit_path
+                      if not Path(cfg.report.junit_path).is_absolute()
+                      else Path(cfg.report.junit_path))
+        junitxml_mod.write_report(
+            junitxml_mod.render(gate_result, cfg), junit_path)
+        _log(f"junit report: {junit_path}")
 
     update = args.update_baseline or os.environ.get("EVALGATE_UPDATE_BASELINE") == "1"
     if baseline is None and cfg.baseline.auto_write_on_missing:
@@ -162,6 +169,128 @@ def cmd_run(args) -> int:
         _log(f"  - {reason}")
     _log(f"report: {report_path}")
     return EXIT_GREEN if gate_result.green else EXIT_RED
+
+
+def cmd_run(args) -> int:
+    cfg, _warnings, _cfg_path = _resolve_config(args)
+
+    assert cfg.source_path is not None
+    base_dir = cfg.source_path.parent
+    workdir = base_dir
+    if cfg.evals.working_dir:
+        candidate = Path(cfg.evals.working_dir)
+        workdir = candidate if candidate.is_absolute() else (base_dir / candidate)
+
+    # Pass a curated environment to the eval command: PR context variables
+    # do not leak into child processes (keeps eval output reproducible).
+    passthrough = {}
+    for var in ("DEMO_MODE",):
+        if var in os.environ:
+            passthrough[var] = os.environ[var]
+
+    _log(f"running '{cfg.evals.command}' x{cfg.evals.repetitions} "
+         f"(base seed {cfg.evals.base_seed}, cwd {workdir})")
+    outcome = runner_mod.run_evals(
+        cfg.evals.command, cfg.evals.repetitions, cfg.evals.base_seed,
+        workdir, extra_env=passthrough,
+    )
+
+    return _gate_pipeline(cfg, outcome.rows, args)
+
+
+def cmd_ingest(args) -> int:
+    cfg, _warnings, _cfg_path = _resolve_config(args)
+    source_arg = getattr(args, "source", None)
+    if not source_arg:
+        _log("ingest requires a source path (e.g. pytest's --junitxml output)")
+        return EXIT_ERROR
+    source = Path(source_arg)
+    if not source.is_absolute():
+        source = Path.cwd() / source
+    if not source.exists():
+        _log(f"ingest source not found: {source}")
+        return EXIT_ERROR
+    fmt = getattr(args, "format", "pytest-junit") or "pytest-junit"
+    if fmt not in adapters_mod.FORMATS:
+        _log(f"unsupported ingest format: {fmt} "
+             f"(supported: {', '.join(adapters_mod.FORMATS)})")
+        return EXIT_ERROR
+    try:
+        rows = adapters_mod.parse_pytest_junit(source)
+    except ValueError as exc:
+        _log(f"ingest error: {exc}")
+        return EXIT_ERROR
+    _log(f"ingested {len(rows)} row(s) from {source} (format {fmt})")
+    return _gate_pipeline(
+        cfg, rows, args,
+        source_note=(f"rows ingested from {fmt} report: {source} "
+                     "(evals.command was not executed; repetitions do not "
+                     "apply to ingested rows)"),
+    )
+
+
+def cmd_diff(args) -> int:
+    cfg, _warnings, _cfg_path = _resolve_config(args)
+    bpath = baseline_mod.baseline_path(cfg)
+
+    a_arg = getattr(args, "a", None)
+    b_arg = getattr(args, "b", None)
+
+    if a_arg:
+        a_path = Path(a_arg)
+        if not a_path.is_absolute():
+            a_path = Path.cwd() / a_path
+        if not a_path.exists():
+            _log(f"diff source A not found: {a_path}")
+            return EXIT_ERROR
+        try:
+            a = diff_mod.load_snapshot(a_path)
+        except ValueError as exc:
+            _log(f"diff error: {exc}")
+            return EXIT_ERROR
+        a_label = str(a_path)
+    else:
+        if not bpath.exists():
+            _log(f"no baseline at {bpath}; pass snapshot paths or run "
+                 "evalgate first")
+            return EXIT_ERROR
+        try:
+            a = diff_mod.load_snapshot(bpath)
+        except ValueError as exc:
+            _log(f"diff error: {exc}")
+            return EXIT_ERROR
+        a_label = f"baseline ({bpath})"
+
+    if b_arg:
+        b_path = Path(b_arg)
+        if not b_path.is_absolute():
+            b_path = Path.cwd() / b_path
+        if not b_path.exists():
+            _log(f"diff source B not found: {b_path}")
+            return EXIT_ERROR
+        try:
+            b = diff_mod.load_snapshot(b_path)
+        except ValueError as exc:
+            _log(f"diff error: {exc}")
+            return EXIT_ERROR
+        b_label = str(b_path)
+    else:
+        entries = history_mod.load_history(history_mod.history_path(cfg))
+        if not entries:
+            _log("no history yet; pass a second snapshot path (evalgate diff "
+                 "A B) or run evalgate first")
+            return EXIT_ERROR
+        b = diff_mod.from_history_entry(entries[-1])
+        if not b:
+            _log("last history entry carries no metrics; cannot diff")
+            return EXIT_ERROR
+        b_label = f"last run {entries[-1].get('ts', '?')}"
+
+    rows = diff_mod.compare(a, b, cfg.gate.regression)
+    print(diff_mod.render(rows, a_label, b_label))
+    if any(r["status"] == diff_mod.WORSE for r in rows):
+        return EXIT_RED
+    return EXIT_GREEN
 
 
 def cmd_baseline(args) -> int:
@@ -264,6 +393,31 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--json", action="store_true",
                        help="print a machine-readable result document to stdout")
     p_run.set_defaults(func=cmd_run)
+
+    p_ing = sub.add_parser(
+        "ingest", help="gate an existing test report instead of running a command")
+    p_ing.add_argument("--format", default="pytest-junit",
+                       choices=list(adapters_mod.FORMATS),
+                       help="report format to ingest (default: pytest-junit)")
+    p_ing.add_argument("source",
+                       help="path to the report file (e.g. pytest's --junitxml output)")
+    p_ing.add_argument("--config", help="path to svx.evalgate.yaml / .json")
+    p_ing.add_argument("--update-baseline", action="store_true",
+                       help="write a new baseline after the ingest")
+    p_ing.add_argument("--report-stdout", action="store_true",
+                       help="print the markdown report to stdout")
+    p_ing.add_argument("--json", action="store_true",
+                       help="print a machine-readable result document to stdout")
+    p_ing.set_defaults(func=cmd_ingest)
+
+    p_diff = sub.add_parser(
+        "diff", help="compare two metric snapshots (default: baseline vs last run)")
+    p_diff.add_argument("a", nargs="?", default=None,
+                        help="snapshot A (default: the project baseline)")
+    p_diff.add_argument("b", nargs="?", default=None,
+                        help="snapshot B (default: the last history entry)")
+    p_diff.add_argument("--config", help="path to svx.evalgate.yaml / .json")
+    p_diff.set_defaults(func=cmd_diff)
 
     p_base = sub.add_parser("baseline", help="show or reset the baseline document")
     p_base.add_argument("action", nargs="?", default="show",
