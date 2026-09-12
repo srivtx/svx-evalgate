@@ -12,7 +12,8 @@ def _agg_from_metrics(pass_at_k_mean, mean_score, pak_ci=None, ms_ci=None):
     agg.pass_at_k_mean = pass_at_k_mean
     agg.mean_score = mean_score
     agg.pass_at_k_mean_ci = pak_ci
-    agg.pass_at_k_ci = pak_ci or ((pass_at_k_mean, pass_at_k_mean) if pass_at_k_mean is not None else None)
+    agg.pass_at_k_ci = pak_ci or (
+        (pass_at_k_mean, pass_at_k_mean) if pass_at_k_mean is not None else None)
     agg.mean_score_ci = ms_ci or ((mean_score, mean_score) if mean_score is not None else None)
     agg.pass_rate = pass_at_k_mean
     agg.pass_rate_ci = agg.pass_at_k_ci
@@ -138,8 +139,8 @@ class TestRegression:
         agg = _agg_from_metrics(0.85, None, pak_ci=(0.83, 0.87))
         result = gate_mod.evaluate(
             agg, _cfg(mode="relative", tol=0.10), baseline=self._baseline(mean=None))
-        pak = [v for v in result.verdicts
-               if v.kind == "regression" and v.metric == "pass_at_k_mean"][0]
+        pak = next(v for v in result.verdicts
+                   if v.kind == "regression" and v.metric == "pass_at_k_mean")
         assert pak.band == pytest.approx(0.09)
         assert pak.status == gate_mod.PASS
 
@@ -148,8 +149,8 @@ class TestRegression:
         agg = _agg_from_metrics(0.74, None, pak_ci=(0.71, 0.77))
         result = gate_mod.evaluate(
             agg, _cfg(mode="relative", tol=0.10), baseline=self._baseline(mean=None))
-        pak = [v for v in result.verdicts
-               if v.kind == "regression" and v.metric == "pass_at_k_mean"][0]
+        pak = next(v for v in result.verdicts
+                   if v.kind == "regression" and v.metric == "pass_at_k_mean")
         assert pak.status == gate_mod.REGRESSION
         assert not result.green
 
@@ -197,3 +198,133 @@ class TestBounds:
             def metric_ci(self, name):
                 return None
         assert gate_mod._bounds(Bare(), "x") == (0.5, 0.5)
+
+
+def _agg_with_latency(p95, p95_ci=None, cost=None, cost_ci=None,
+                       pak_mean=0.9, pak_ci=(0.85, 0.95)):
+    class FakeAgg:
+        pass
+    agg = FakeAgg()
+    agg.pass_at_k_mean = pak_mean
+    agg.pass_at_k_ci = pak_ci
+    agg.pass_rate = pak_mean
+    agg.pass_rate_ci = pak_ci
+    agg.mean_score = None
+    agg.mean_score_ci = None
+    agg.p95_latency_ms = p95
+    agg.p95_latency_ci = p95_ci or ((p95, p95) if p95 is not None else None)
+    agg.total_cost_usd = cost
+    agg.total_cost_ci = cost_ci or ((cost, cost) if cost is not None else None)
+
+    def metric_value(name):
+        return {"pass_at_k_mean": agg.pass_at_k_mean,
+                "pass_rate": agg.pass_rate,
+                "mean_score": agg.mean_score,
+                "p95_latency_ms": agg.p95_latency_ms,
+                "total_cost_usd": agg.total_cost_usd}.get(name)
+
+    def metric_ci(name):
+        return {"pass_at_k_mean": agg.pass_at_k_ci,
+                "pass_rate": agg.pass_rate_ci,
+                "mean_score": agg.mean_score_ci,
+                "p95_latency_ms": agg.p95_latency_ci,
+                "total_cost_usd": agg.total_cost_ci}.get(name)
+
+    agg.metric_value = metric_value
+    agg.metric_ci = metric_ci
+    return agg
+
+
+def _cfg_v2(max_lat=None, max_cost=None, tol=50.0, mode="absolute"):
+    from evalgate import config as config_mod
+    return config_mod.Config(
+        gate=config_mod.GateConfig(
+            k=1, min_pass_at_k=0.85,
+            max_p95_latency_ms=max_lat, max_total_cost_usd=max_cost,
+            regression=config_mod.RegressionConfig(mode=mode, tolerance=tol),
+        ),
+    )
+
+
+class TestLatencyThresholds:
+    def test_under_limit_passes(self):
+        agg = _agg_with_latency(p95=800.0)
+        result = gate_mod.evaluate(agg, _cfg_v2(max_lat=1200.0), baseline=None)
+        assert result.green
+        lat = [v for v in result.verdicts if v.metric == "p95_latency_ms"]
+        assert lat and lat[0].status == gate_mod.PASS
+        assert "800.0 ms" in lat[0].detail
+
+    def test_over_limit_fails(self):
+        agg = _agg_with_latency(p95=1400.0)
+        result = gate_mod.evaluate(agg, _cfg_v2(max_lat=1200.0), baseline=None)
+        assert not result.green
+        lat = next((v for v in result.verdicts if v.metric == "p95_latency_ms"), None)
+        assert lat is not None and lat.status == gate_mod.FAIL
+
+    def test_missing_latency_notes(self):
+        agg = _agg_with_latency(p95=None)
+        result = gate_mod.evaluate(agg, _cfg_v2(max_lat=1200.0), baseline=None)
+        assert result.green  # notes only, not a failure
+        assert any("latency" in n for n in result.notes)
+
+
+class TestCostThresholds:
+    def test_under_limit_passes(self):
+        agg = _agg_with_latency(p95=None, cost=0.4)
+        result = gate_mod.evaluate(agg, _cfg_v2(max_cost=1.0), baseline=None)
+        assert result.green
+
+    def test_over_limit_fails(self):
+        agg = _agg_with_latency(p95=None, cost=1.4)
+        result = gate_mod.evaluate(agg, _cfg_v2(max_cost=1.0), baseline=None)
+        assert not result.green
+        cost = next((v for v in result.verdicts if v.metric == "total_cost_usd"), None)
+        assert cost is not None and cost.status == gate_mod.FAIL
+
+
+class TestDirectionAwareRegression:
+    def test_latency_regression_above_band(self):
+        # current interval entirely ABOVE baseline + band -> RED
+        agg = _agg_with_latency(p95=1200.0, p95_ci=(1150.0, 1250.0))
+        baseline = {"config_hash": None, "metrics": {
+            "p95_latency_ms": {"value": 800.0, "low": 780.0, "high": 820.0}}}
+        result = gate_mod.evaluate(agg, _cfg_v2(tol=50.0), baseline=baseline)
+        lat = next((v for v in result.verdicts if v.metric == "p95_latency_ms"), None)
+        assert lat is not None and lat.status == gate_mod.REGRESSION
+        assert not result.green
+
+    def test_latency_noise_stays_green(self):
+        # overlapping intervals -> PASS (the anti-flake guarantee)
+        agg = _agg_with_latency(p95=860.0, p95_ci=(780.0, 940.0))
+        baseline = {"config_hash": None, "metrics": {
+            "p95_latency_ms": {"value": 800.0, "low": 760.0, "high": 840.0}}}
+        result = gate_mod.evaluate(agg, _cfg_v2(tol=50.0), baseline=baseline)
+        lat = next((v for v in result.verdicts if v.metric == "p95_latency_ms"), None)
+        assert lat is not None and lat.status == gate_mod.PASS
+        assert result.green
+
+    def test_latency_improved_below_band(self):
+        agg = _agg_with_latency(p95=500.0, p95_ci=(480.0, 520.0))
+        baseline = {"config_hash": None, "metrics": {
+            "p95_latency_ms": {"value": 800.0, "low": 780.0, "high": 820.0}}}
+        result = gate_mod.evaluate(agg, _cfg_v2(tol=50.0), baseline=baseline)
+        lat = next((v for v in result.verdicts if v.metric == "p95_latency_ms"), None)
+        assert lat is not None and lat.status == gate_mod.IMPROVED
+
+    def test_cost_regression_relative_band(self):
+        # relative mode: band = 10% of baseline 0.5 -> 0.05
+        agg = _agg_with_latency(p95=None, cost=0.62, cost_ci=(0.61, 0.63))
+        baseline = {"config_hash": None, "metrics": {
+            "total_cost_usd": {"value": 0.5, "low": 0.49, "high": 0.51}}}
+        result = gate_mod.evaluate(
+            agg, _cfg_v2(tol=0.10, mode="relative"), baseline=baseline)
+        cost = next((v for v in result.verdicts if v.metric == "total_cost_usd"), None)
+        assert cost is not None and cost.status == gate_mod.REGRESSION
+
+    def test_old_baseline_without_latency_is_skipped(self):
+        agg = _agg_with_latency(p95=1200.0)
+        baseline = {"config_hash": None, "metrics": {
+            "pass_at_k_mean": {"value": 0.9, "low": 0.88, "high": 0.92}}}
+        result = gate_mod.evaluate(agg, _cfg_v2(), baseline=baseline)
+        assert not any(v.metric == "p95_latency_ms" for v in result.verdicts)

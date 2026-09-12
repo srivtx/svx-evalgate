@@ -1,7 +1,8 @@
 """EvalGate command-line interface.
 
     evalgate run [--config PATH] [--update-baseline] [--report-stdout] [--json]
-    evalgate baseline [--config PATH]          # print the current baseline
+    evalgate baseline [show|reset] [--config PATH]
+    evalgate trend [--config PATH] [--limit N]
     evalgate init [DIR]                        # scaffold a gated eval suite
     evalgate version
 
@@ -20,6 +21,8 @@ from . import baseline as baseline_mod
 from . import config as config_mod
 from . import gate as gate_mod
 from . import github as github_mod
+from . import history as history_mod
+from . import htmlreport as htmlreport_mod
 from . import init as init_mod
 from . import report as report_mod
 from . import runner as runner_mod
@@ -32,7 +35,7 @@ def _log(msg: str) -> None:
     print(f"evalgate: {msg}", file=sys.stderr)
 
 
-def _resolve_config(args) -> tuple[config_mod.Config | None, list[str], Path]:
+def _resolve_config(args) -> tuple[config_mod.Config, list[str], Path]:
     cwd = Path.cwd()
     path = config_mod.find_config(getattr(args, "config", None), cwd)
     if path is None:
@@ -42,18 +45,21 @@ def _resolve_config(args) -> tuple[config_mod.Config | None, list[str], Path]:
             "directory or pass --config"
         )
     cfg, warnings = config_mod.load_config(path)
+    assert cfg is not None and cfg.source_path is not None
     for warning in warnings:
         _log(warning)
     return cfg, warnings, path
 
 
 def cmd_run(args) -> int:
-    cfg, _warnings, cfg_path = _resolve_config(args)
+    cfg, _warnings, _cfg_path = _resolve_config(args)
 
-    workdir = cfg.source_path.parent
+    assert cfg.source_path is not None
+    base_dir = cfg.source_path.parent
+    workdir = base_dir
     if cfg.evals.working_dir:
         candidate = Path(cfg.evals.working_dir)
-        workdir = candidate if candidate.is_absolute() else (cfg.source_path.parent / candidate)
+        workdir = candidate if candidate.is_absolute() else (base_dir / candidate)
 
     # Pass a curated environment to the eval command: PR context variables
     # do not leak into child processes (keeps eval output reproducible).
@@ -82,12 +88,30 @@ def cmd_run(args) -> int:
 
     gate_result = gate_mod.evaluate(agg, cfg, baseline)
 
+    # history first (v2): the HTML trend chart includes the current run
+    hpath = history_mod.history_path(cfg)
+    history_entries: list[dict] = []
+    if cfg.history.enabled:
+        entry = history_mod.run_summary(agg, cfg, gate_result, __version__)
+        history_mod.append_run(hpath, entry, cfg.history.max_entries)
+        history_entries = history_mod.load_history(
+            hpath, limit=max(cfg.history.max_entries, 30))
+
     markdown = report_mod.render(agg, cfg, baseline, gate_result)
-    report_path = (cfg.source_path.parent / cfg.report.path
+    report_path = (base_dir / cfg.report.path
                    if not Path(cfg.report.path).is_absolute() else Path(cfg.report.path))
     report_mod.write_report(markdown, report_path)
     github_mod.write_step_summary(markdown)
     github_mod.post_pr_comment(markdown)
+
+    if cfg.report.html_path:
+        html_path = (base_dir / cfg.report.html_path
+                     if not Path(cfg.report.html_path).is_absolute()
+                     else Path(cfg.report.html_path))
+        htmlreport_mod.write_report(
+            htmlreport_mod.render(agg, cfg, baseline, gate_result, history_entries),
+            html_path)
+        _log(f"html report: {html_path}")
 
     update = args.update_baseline or os.environ.get("EVALGATE_UPDATE_BASELINE") == "1"
     if baseline is None and cfg.baseline.auto_write_on_missing:
@@ -118,6 +142,10 @@ def cmd_run(args) -> int:
                 "mean_score": agg.mean_score,
                 "mean_score_ci": (list(agg.mean_score_ci)
                                   if agg.mean_score_ci else None),
+                "p95_latency_ms": agg.p95_latency_ms,
+                "p95_latency_ci": (list(agg.p95_latency_ci)
+                                   if agg.p95_latency_ci else None),
+                "total_cost_usd": agg.total_cost_usd,
             },
             "total_runs": agg.total_runs,
             "total_passes": agg.total_passes,
@@ -139,11 +167,61 @@ def cmd_run(args) -> int:
 def cmd_baseline(args) -> int:
     cfg, _warnings, _path = _resolve_config(args)
     bpath = baseline_mod.baseline_path(cfg)
+    action = getattr(args, "action", "show") or "show"
+    if action == "reset":
+        if bpath.exists():
+            bpath.unlink()
+            _log(f"baseline removed: {bpath}")
+            _log("next `evalgate run --update-baseline` records a fresh one")
+        else:
+            _log(f"no baseline at {bpath} (nothing to reset)")
+        return EXIT_GREEN
     doc = baseline_mod.load_baseline(bpath)
     if doc is None:
         _log(f"no baseline at {bpath}")
         return EXIT_ERROR
     print(json.dumps(doc, indent=2, sort_keys=True))
+    return EXIT_GREEN
+
+
+def cmd_trend(args) -> int:
+    cfg, _warnings, _path = _resolve_config(args)
+    hpath = history_mod.history_path(cfg)
+    limit = max(1, getattr(args, "limit", 15) or 15)
+    entries = history_mod.load_history(hpath, limit=limit)
+    if not entries:
+        _log(f"no history at {hpath} yet")
+        _log("history grows by one entry every `evalgate run`")
+        return EXIT_ERROR
+    total = len(history_mod.load_history(hpath))
+    shown = entries[-limit:]
+
+    def cell(value, spec: str, prefix: str = "") -> str:
+        if value is None:
+            return ""
+        return prefix + format(value, spec)
+
+    print(f"evalgate: trend - last {len(shown)} of {total} run(s)")
+    header = (f"{'run':>4}  {'timestamp':19}  {'verdict':7}  "
+              f"{'pass@k':>7}  {'rate':>6}  {'score':>6}  "
+              f"{'p95 ms':>8}  {'cost':>9}")
+    print(header)
+    print("-" * len(header))
+    for i, e in enumerate(shown, start=1):
+        ts = str(e.get("ts", ""))[:19].replace("T", " ")
+        verdict = str(e.get("verdict", "?"))
+        pak = cell(e.get("pass_at_k_mean"), ".3f")
+        rate = cell(e.get("pass_rate"), ".3f")
+        score = cell(e.get("mean_score"), ".3f")
+        p95 = cell(e.get("p95_latency_ms"), ",.0f")
+        cost = cell(e.get("total_cost_usd"), ".4f", prefix="$")
+        print(f"{i:>4}  {ts:19}  {verdict:7}  "
+              f"{pak:>7}  {rate:>6}  {score:>6}  "
+              f"{p95:>8}  {cost:>9}")
+    values = [e.get("pass_at_k_mean") for e in shown]
+    if any(v is not None for v in values):
+        print()
+        print(f"pass@k sparkline: {history_mod.sparkline(values)}")
     return EXIT_GREEN
 
 
@@ -187,9 +265,19 @@ def build_parser() -> argparse.ArgumentParser:
                        help="print a machine-readable result document to stdout")
     p_run.set_defaults(func=cmd_run)
 
-    p_base = sub.add_parser("baseline", help="print the current baseline document")
+    p_base = sub.add_parser("baseline", help="show or reset the baseline document")
+    p_base.add_argument("action", nargs="?", default="show",
+                        choices=["show", "reset"],
+                        help="show: print the baseline (default); "
+                             "reset: delete it so the next run re-records")
     p_base.add_argument("--config", help="path to svx.evalgate.yaml / .json")
     p_base.set_defaults(func=cmd_baseline)
+
+    p_trend = sub.add_parser("trend", help="recent run history + sparkline")
+    p_trend.add_argument("--config", help="path to svx.evalgate.yaml / .json")
+    p_trend.add_argument("--limit", type=int, default=15,
+                         help="number of recent runs to show (default 15)")
+    p_trend.set_defaults(func=cmd_trend)
 
     p_init = sub.add_parser("init", help="scaffold svx.evalgate.yaml + evals/run_evals.py")
     p_init.add_argument("directory", nargs="?", default=".",

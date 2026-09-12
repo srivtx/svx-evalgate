@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & usage help
+    url: https://github.com/srivtx/svx-evalgate/discussions
+    about: Ask how to gate your suite - config reviews welcome
+  - name: Research background
+    url: https://github.com/srivtx/svx-research
+    about: The gap analysis this project comes from

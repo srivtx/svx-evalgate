@@ -3,10 +3,11 @@
 **Deterministic statistics for non-deterministic software.** EvalGate wraps the eval suite you already run and turns its flaky output into one ordinary, trustworthy **green-or-red check on your pull request**.
 
 ![SVX](https://img.shields.io/badge/SVX-EvalGate-1d9459?style=flat-square)
-![version](https://img.shields.io/badge/version-1.1.0-40c884?style=flat-square)
-![tests](https://img.shields.io/badge/tests-108%20passing-2f5140?style=flat-square)
+![version](https://img.shields.io/badge/version-2.0.0-40c884?style=flat-square)
+![tests](https://img.shields.io/badge/tests-193%20passing-2f5140?style=flat-square)
+![coverage](https://img.shields.io/badge/coverage-88%25-388860?style=flat-square)
 ![deps](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-747d78?style=flat-square)
-![typed](https://img.shields.io/badge/typed-PEP%20561-388860?style=flat-square)
+![typed](https://img.shields.io/badge/typed-PEP%20561%20%2B%20mypy%20clean-388860?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-1d9459?style=flat-square)
 
 [![CI](https://github.com/srivtx/svx-evalgate/actions/workflows/ci.yml/badge.svg)](https://github.com/srivtx/svx-evalgate/actions/workflows/ci.yml)
@@ -40,7 +41,10 @@ This is the gap SVX Research ranked **#1 of twelve** validated opportunities in 
 | **pass@k** | The unbiased combinatorial estimator from the Codex/HumanEval paper, computed per eval case: the probability the case passes at least once in k runs. Not "did my single sample pass". |
 | **Fixed seeds** | Every repetition runs your command with `SVX_SEED = base_seed + i`. Same seed in, same verdict out - flaky gates are a design failure, not a fact of life. |
 | **Regression bands** | A committed baseline (`.svx/baseline.json`) records what "good" means - value *and* confidence interval. A PR goes red only when the current run's entire interval sits below the baseline's interval minus your tolerance: noise cannot separate two intervals from the same distribution. |
-| **Bootstrap CI** | Seeded percentile bootstrap for score means - deterministic, because the seed derives from a stable digest of (base_seed, metric). |
+| **Latency + cost (v2)** | Rows may carry `latency_ms` and `cost_usd`. EvalGate computes p50/p95/max latency with bootstrap CIs, total and mean cost, and gates on upper bounds (`max_p95_latency_ms`, `max_total_cost_usd`) and on regressions - direction-aware, because slower/costlier is worse, not better. |
+| **HTML report (v2)** | Every run writes a self-contained `.svx/report.html` - metric cards, per-case bars, trend line across runs, score and latency histograms - inline SVG, zero external resources, works from `file://` and CI artifacts. |
+| **Run history (v2)** | Every run appends to `.svx/history.jsonl` (bounded, trimmed). `evalgate trend` prints the table plus a unicode sparkline; the HTML report plots it. |
+| **Bootstrap CI** | Seeded percentile bootstrap for score means and percentiles - deterministic, because the seed derives from a stable digest of (base_seed, metric). |
 | **Zero dependencies** | Pure Python standard library. Installs in seconds, runs anywhere, has no supply chain. |
 | **Plays well with others** | EvalGate does not host your evals, judge them, or store them. It is not another platform. It connects whatever you already run to the workflow engineers already trust. |
 
@@ -60,10 +64,10 @@ Or wire an existing suite by hand:
 **1. Wrap your eval suite.** Make your runner print one JSON object per line per invocation:
 
 ```json
-{"case": "sql-gen-basic", "passed": true, "score": 0.93}
+{"case": "sql-gen-basic", "passed": true, "score": 0.93, "latency_ms": 812.4, "cost_usd": 0.0013}
 ```
 
-`passed` is required; `score` is optional. A ten-line wrapper around pytest, a notebook, or an existing harness is the entire integration.
+`passed` is required; `score`, `latency_ms`, `cost_usd` are optional (numbers >= 0 when present). A ten-line wrapper around pytest, a notebook, or an existing harness is the entire integration.
 
 **2. Add the config** (`svx.evalgate.yaml` in the repo root):
 
@@ -77,6 +81,8 @@ gate:
   k: 1
   min_pass_at_k: 0.80
   min_mean_score: 0.60
+  max_p95_latency_ms: 1200    # optional (v2)
+  max_total_cost_usd: 1.00    # optional (v2)
   regression:
     mode: absolute        # or "relative"
     tolerance: 0.04
@@ -89,9 +95,11 @@ pip install svx-evalgate      # or: pip install git+https://github.com/srivtx/sv
 evalgate run --update-baseline   # first run: record what good looks like
 evalgate run                     # every run after: gate against it
 evalgate run --json              # machine-readable verdict for bots and dashboards
+evalgate trend                   # (v2) recent runs + sparkline
+evalgate baseline reset          # (v2) drop the baseline, re-record on next run
 ```
 
-Exit codes: `0` green · `1` red (threshold or regression) · `2` error. Add `--json` for a machine-readable document (verdict, reasons, every metric with its confidence interval, failing cases, baseline state) — for non-GitHub CI systems, dashboards, or chat bots that post the gate result.
+Exit codes: `0` green · `1` red (threshold or regression) · `2` error. Add `--json` for a machine-readable document (verdict, reasons, every metric with its confidence interval - latency and cost included - failing cases, baseline state) — for non-GitHub CI systems, dashboards, or chat bots that post the gate result.
 
 **4. Gate your pull requests** - `.github/workflows/evalgate.yml`:
 
@@ -109,12 +117,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: srivtx/svx-evalgate@v1     # the action installs and runs the gate
+      - uses: srivtx/svx-evalgate@v2     # the action installs and runs the gate
         with:
           update-baseline: ${{ github.ref == 'refs/heads/main' }}
 ```
 
-Pushes to `main` refresh the baseline; PRs are gated against it. The check posts a full report to the PR - metric table, per-case pass@k, confidence intervals, baseline provenance - and to the job's step summary.
+Pushes to `main` refresh the baseline; PRs are gated against it. The check posts a full report to the PR - metric table, per-case pass@k, confidence intervals, latency and cost statistics, baseline provenance - and to the job's step summary.
+
+## The HTML report (v2)
+
+Every run also writes a **self-contained HTML report** - one file, inline SVG, no external fonts or scripts, so it renders identically in a browser, from `file://`, and in CI artifacts:
+
+![EvalGate HTML report - GREEN run](docs/assets/report-preview.png)
+
+A regression run paints the same page red, with the statistical evidence for *why* - intervals against intervals, direction-aware for latency and cost:
+
+![EvalGate HTML report - RED regression](docs/assets/report-red.png)
 
 ## The report you get on every PR
 
@@ -161,6 +179,8 @@ evalgate run                        # GREEN: back within band
 
 **pass@k.** For a case run `n` times with `c` passes, the unbiased estimator of "passes at least once in k future runs" is `1 − C(n−c, k) / C(n, k)` (Chen et al., 2021). It is exact, closed-form, and never flaps. EvalGate reports it per case and aggregates the mean.
 
+**Latency and cost (v2).** Latency percentiles use the nearest-rank method (deterministic across platforms - a sort and an index, no interpolation). Their bootstrap CIs resample rows and recompute the percentile, capped at 2,000 iterations so gated runs stay fast. Total cost is the row sum; its interval bootstraps the per-row mean and scales by the row count. Both metrics gate on upper bounds and on regression bands with inverted direction: REGRESSION when the current interval sits entirely *above* the baseline's interval plus the band.
+
 **Regression bands.** The baseline stores each metric's confidence interval alongside its value (Wilson intervals for rates, seeded bootstrap for means and pass@k). A PR is called REGRESSION only when the current run's *entire* interval sits below the baseline's interval minus your tolerance - i.e. the run is confidently worse than the baseline by more than the band. Overlapping intervals are PASS, which is what makes the gate flake-proof: sampling noise moves point estimates around, but it cannot separate two intervals drawn from the same distribution. The band width is yours to choose, absolute or relative.
 
 **Determinism.** Nothing in the pipeline uses wall-clock time, `hash()`, or unseeded randomness. Sub-seeds derive from SHA-256 of `(base_seed, metric name)`. The test suite proves it: two full runs with the same seed produce byte-identical reports, including the bootstrap.
@@ -181,11 +201,17 @@ The research finding worth repeating: eval platforms live in dashboards *outside
 | `gate.k` | `1` | k for per-case pass@k |
 | `gate.min_pass_at_k` | `0.85` | Aggregate threshold on mean pass@k |
 | `gate.min_mean_score` | *(off)* | Optional threshold on mean score |
+| `gate.max_p95_latency_ms` | *(off)* | v2: RED when p95 latency exceeds this |
+| `gate.max_total_cost_usd` | *(off)* | v2: RED when total cost exceeds this |
 | `gate.regression.mode` | `absolute` | `absolute` or `relative` (fraction of baseline) |
 | `gate.regression.tolerance` | `0.05` | Band width before REGRESSION |
 | `baseline.path` | `.svx/baseline.json` | Baseline location (commit it) |
 | `baseline.auto_write_on_missing` | `false` | Write a baseline on first run |
 | `report.path` | `.svx/report.md` | Markdown report location |
+| `report.html_path` | `.svx/report.html` | v2: HTML report location (`~` disables) |
+| `history.enabled` | `true` | v2: append run summaries to history |
+| `history.path` | `.svx/history.jsonl` | v2: run history location (do not commit) |
+| `history.max_entries` | `500` | v2: trim oldest beyond this many entries |
 
 JSON configs (`svx.evalgate.json`) are supported natively. The YAML subset parser handles the schema above with zero dependencies; anything exotic, use JSON.
 
@@ -199,12 +225,18 @@ JSON configs (`svx.evalgate.json`) are supported natively. The YAML subset parse
 ## Repository layout
 
 ```
-evalgate/            the package (config, runner, stats, baseline, gate, report, github, init, cli)
-tests/               108 tests: statistics property tests, gate logic, config/runner, full e2e
-examples/llm-app/    complete demo: seeded mock suite + config + regression walkthrough
+evalgate/            the package (config, runner, stats, baseline, gate, report, github,
+                     history, htmlreport, init, cli) - mypy-clean, ruff-clean
+tests/               193 tests: statistics property tests, gate logic, config/runner,
+                     HTML report rendering (incl. XSS escaping), history, full e2e
+examples/llm-app/    complete demo: seeded mock suite with latency + cost, config,
+                     regression walkthrough
 action.yml           GitHub Action (composite, installs and runs the gate)
-docs/methodology.md  the statistics, precisely: pass@k, Wilson, seeded bootstrap, interval-vs-interval
-.github/workflows/   ci.yml (tests + self-checks), evalgate.yml (dogfooding), release.yml
+docs/methodology.md  the statistics, precisely: pass@k, Wilson, seeded bootstrap,
+                     percentiles, interval-vs-interval, direction-aware bands
+docs/assets/         screenshots of the HTML report (green and red)
+.github/workflows/   ci.yml (lint + tests w/ coverage gate + self-checks),
+                     evalgate.yml (dogfooding), release.yml (build + opt-in PyPI)
 CHANGELOG.md         every user-visible change, per release
 CONTRIBUTING.md      ground rules (determinism is the product)
 SECURITY.md          reporting and scope
@@ -218,11 +250,15 @@ EvalGate builds **gap #1** of the [SVX Industry Gap Analysis 2025-2026](https://
 
 - [x] `evalgate init` scaffolding (v1.1.0)
 - [x] `--json` machine-readable output (v1.1.0)
+- [x] Latency + cost statistics, thresholds, and regression tracking (v2.0.0)
+- [x] Self-contained HTML report with inline SVG charts (v2.0.0)
+- [x] Run history + `evalgate trend` + `evalgate baseline reset` (v2.0.0)
+- [x] Ruff + mypy clean, coverage gate at 85% in CI (v2.0.0)
 - [ ] JUnit-XML and pytest report adapters (zero-wrapper ingestion)
 - [ ] `evalgate diff` - compare two baselines at the command line
-- [ ] Cost dimensions: token spend per case alongside pass@k
 - [ ] GitLab CI and generic webhook exits
 - [ ] Per-case regression bands (not just aggregate metrics)
+- [ ] PyPI publication (workflow is ready; awaiting trusted-publisher setup)
 
 ## License
 

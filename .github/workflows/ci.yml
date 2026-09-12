@@ -6,6 +6,22 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 'Ruff (lint + import order)'
+        run: |
+          pip install --quiet 'ruff>=0.8'
+          ruff check evalgate/ tests/
+      - name: 'Mypy (type check)'
+        run: |
+          pip install --quiet 'mypy>=1.13'
+          mypy evalgate/
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -20,8 +36,8 @@ jobs:
         run: |
           pip install --quiet .[dev]
           evalgate version
-      - name: 'Unit + end-to-end tests'
-        run: pytest -v
+      - name: 'Unit + end-to-end tests (coverage gate 85%)'
+        run: pytest --cov=evalgate --cov-report=term-missing --cov-fail-under=85
 
       - name: 'Self-check: green path'
         working-directory: examples/llm-app
@@ -43,3 +59,10 @@ jobs:
             exit 1
           fi
           echo "regression correctly detected (exit 1)"
+
+      - name: 'Self-check: v2 artifacts (html report + history + trend)'
+        working-directory: examples/llm-app
+        run: |
+          test -f .svx/report.html
+          test -f .svx/history.jsonl
+          evalgate trend --limit 3

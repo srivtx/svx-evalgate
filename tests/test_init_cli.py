@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from evalgate import __version__, init as init_mod
+from evalgate import __version__
 from evalgate import cli as cli_mod
+from evalgate import init as init_mod
 
 
 def test_init_creates_config_and_runner(tmp_path: Path) -> None:

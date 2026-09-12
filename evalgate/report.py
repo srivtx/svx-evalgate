@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .gate import GateResult, IMPROVED, REGRESSION
+from .gate import IMPROVED, REGRESSION, GateResult
 
 _GREEN = "#298959"
 _LIGHT = "#4fbb85"
@@ -11,7 +11,7 @@ _DARK = "#1f5e40"
 
 
 def _status_word(status: str) -> str:
-    if status in (IMPROVED,):
+    if status == IMPROVED:
         return "IMPROVED"
     if status == REGRESSION:
         return "REGRESSION"
@@ -92,6 +92,22 @@ def render(agg, config, baseline: dict | None, gate_result: GateResult) -> str:
             f"Mean score {agg.mean_score:.3f}, bootstrap 95% CI "
             f"[{agg.mean_score_ci[0]:.3f}, {agg.mean_score_ci[1]:.3f}] "
             f"(seeded, deterministic)."
+        )
+        lines.append("")
+
+    if agg.p95_latency_ms is not None:
+        lines.append(
+            f"P95 latency {agg.p95_latency_ms:.1f} ms "
+            f"(p50 {agg.p50_latency_ms:.1f}, max {agg.max_latency_ms:.1f}), "
+            f"bootstrap 95% CI [{agg.p95_latency_ci[0]:.1f}, "
+            f"{agg.p95_latency_ci[1]:.1f}] ms across {agg.latency_rows} rows."
+        )
+        lines.append("")
+
+    if agg.total_cost_usd is not None:
+        lines.append(
+            f"Total cost ${agg.total_cost_usd:.4f} across {agg.cost_rows} rows "
+            f"(mean ${agg.mean_cost_usd:.5f})."
         )
         lines.append("")
 

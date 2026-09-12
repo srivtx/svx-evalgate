@@ -11,6 +11,11 @@ IMPROVED = "improved"
 FAIL = "fail"
 NA = "n/a"
 
+# Metrics where smaller is better: regression means the current interval
+# sits entirely ABOVE the baseline interval plus the band. For everything
+# else (rates, scores) regression means entirely BELOW.
+LOWER_IS_BETTER = frozenset({"p95_latency_ms", "total_cost_usd"})
+
 
 @dataclass
 class MetricVerdict:
@@ -98,6 +103,43 @@ def evaluate(agg, config, baseline: dict | None) -> GateResult:
             if not ok:
                 result.green = False
 
+    # --- v2 thresholds: upper bounds (latency / cost) ---
+    if gate.max_p95_latency_ms is not None:
+        value = agg.p95_latency_ms
+        if value is None:
+            result.notes.append(
+                "p95 latency not computable (evals emitted no latency_ms)")
+        else:
+            ok = value <= gate.max_p95_latency_ms
+            v = MetricVerdict(
+                metric="p95_latency_ms", kind="threshold", current=value,
+                threshold=gate.max_p95_latency_ms,
+                status=PASS if ok else FAIL,
+                detail=(f"p95 latency {value:.1f} ms "
+                        f"{'<=' if ok else '>'} max {gate.max_p95_latency_ms:.1f} ms"),
+            )
+            result.verdicts.append(v)
+            if not ok:
+                result.green = False
+
+    if gate.max_total_cost_usd is not None:
+        value = agg.total_cost_usd
+        if value is None:
+            result.notes.append(
+                "total cost not computable (evals emitted no cost_usd)")
+        else:
+            ok = value <= gate.max_total_cost_usd
+            v = MetricVerdict(
+                metric="total_cost_usd", kind="threshold", current=value,
+                threshold=gate.max_total_cost_usd,
+                status=PASS if ok else FAIL,
+                detail=(f"total cost ${value:.4f} "
+                        f"{'<=' if ok else '>'} max ${gate.max_total_cost_usd:.4f}"),
+            )
+            result.verdicts.append(v)
+            if not ok:
+                result.green = False
+
     # --- regression checks (only when a baseline exists) ---
     if baseline is None:
         result.notes.append(
@@ -136,12 +178,22 @@ def evaluate(agg, config, baseline: dict | None) -> GateResult:
             band = abs(base_value) * reg.tolerance
         else:
             band = reg.tolerance
-        if cur_high < base_low - band:
-            status = REGRESSION
-        elif cur_low > base_high + band:
-            status = IMPROVED
+        if metric in LOWER_IS_BETTER:
+            # Worse = slower / costlier: current interval entirely ABOVE.
+            if cur_low > base_high + band:
+                status = REGRESSION
+            elif cur_high < base_low - band:
+                status = IMPROVED
+            else:
+                status = PASS
         else:
-            status = PASS
+            # Worse = lower quality: current interval entirely BELOW.
+            if cur_high < base_low - band:
+                status = REGRESSION
+            elif cur_low > base_high + band:
+                status = IMPROVED
+            else:
+                status = PASS
         v = MetricVerdict(
             metric=metric, kind="regression", current=cur_value,
             ci_low=cur_low, ci_high=cur_high,

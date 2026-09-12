@@ -1,6 +1,6 @@
 """Eval command runner.
 
-Contract (v1, JSON Lines on stdout): the eval command is executed
+Contract (v2, JSON Lines on stdout): the eval command is executed
 `repetitions` times. On each repetition i the child process sees
 
     SVX_SEED     = base_seed + i        (int)
@@ -9,20 +9,25 @@ Contract (v1, JSON Lines on stdout): the eval command is executed
 
 and must print one JSON object per non-empty line:
 
-    {"case": "case-name", "passed": true, "score": 0.93, "meta": {...}}
+    {"case": "case-name", "passed": true, "score": 0.93,
+     "latency_ms": 812.4, "cost_usd": 0.0013, "meta": {...}}
 
-`score` is optional (null when absent); `meta` is optional and passed
-through. Wrap your existing eval suite in ten lines of printing code and
+`score`, `latency_ms`, `cost_usd` and `meta` are optional (null when
+absent); `latency_ms` and `cost_usd` must be finite numbers >= 0 when
+present. Wrap your existing eval suite in ten lines of printing code and
 EvalGate handles the statistics.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Optional numeric row fields validated on ingestion (v2).
+_NUMERIC_FIELDS = ("latency_ms", "cost_usd")
 
 
 class RunnerError(RuntimeError):
@@ -40,8 +45,8 @@ class RunOutcome:
 
 def _parse_jsonl(stdout: str, context: str) -> list[dict]:
     rows: list[dict] = []
-    for lineno, line in enumerate(stdout.splitlines(), start=1):
-        line = line.strip()
+    for lineno, raw in enumerate(stdout.splitlines(), start=1):
+        line = raw.strip()
         if not line:
             continue
         try:
@@ -63,10 +68,27 @@ def _parse_jsonl(stdout: str, context: str) -> list[dict]:
         if score is not None:
             try:
                 obj["score"] = float(score)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
                 raise RunnerError(
                     f"{context}: stdout line {lineno}: 'score' must be a number or null"
-                )
+                ) from exc
+        for field_name in _NUMERIC_FIELDS:
+            raw_value = obj.get(field_name)
+            if raw_value is None:
+                continue
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError) as exc:
+                raise RunnerError(
+                    f"{context}: stdout line {lineno}: '{field_name}' "
+                    "must be a number or null"
+                ) from exc
+            if not math.isfinite(value) or value < 0:
+                raise RunnerError(
+                    f"{context}: stdout line {lineno}: '{field_name}' "
+                    "must be a finite number >= 0"
+                ) from None
+            obj[field_name] = value
         rows.append(obj)
     return rows
 

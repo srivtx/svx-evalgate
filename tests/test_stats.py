@@ -1,5 +1,6 @@
 """Tests for evalgate.stats: pass@k, Wilson, bootstrap, aggregation."""
 import math
+from itertools import pairwise
 
 import pytest
 
@@ -30,8 +31,8 @@ class TestPassAtK:
         assert stats.pass_at_k(10, 0, 10) == pytest.approx(0.0)
 
     def test_monotone_in_c(self):
-        values = [stats.pass_at_k(30, c, 3) for c in range(0, 31)]
-        assert all(b >= a for a, b in zip(values, values[1:]))
+        values = [stats.pass_at_k(30, c, 3) for c in range(31)]
+        assert all(b >= a for a, b in pairwise(values))
 
     def test_invalid_inputs(self):
         with pytest.raises(ValueError):
@@ -126,3 +127,127 @@ class TestAggregate:
         assert a1.pass_at_k_mean == pytest.approx(a2.pass_at_k_mean)
         assert a1.mean_score == pytest.approx(a2.mean_score)
         assert a1.mean_score_ci == a2.mean_score_ci
+
+
+class TestPercentile:
+    def test_known_values(self):
+        values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+        assert stats.percentile(values, 0) == 1.0
+        assert stats.percentile(values, 50) == 5.0
+        assert stats.percentile(values, 90) == 9.0
+        assert stats.percentile(values, 100) == 10.0
+
+    def test_single_value(self):
+        assert stats.percentile([7.5], 95) == 7.5
+
+    def test_unsorted_input(self):
+        # nearest-rank on even n picks the lower-middle element (no interpolation)
+        assert stats.percentile([5.0, 1.0, 9.0, 3.0], 50) == 3.0
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError):
+            stats.percentile([], 50)
+
+    def test_bad_q_raises(self):
+        with pytest.raises(ValueError):
+            stats.percentile([1.0], 101)
+        with pytest.raises(ValueError):
+            stats.percentile([1.0], -1)
+
+    def test_deterministic(self):
+        vals = [float(i % 13) for i in range(97)]
+        assert stats.percentile(vals, 95) == stats.percentile(vals, 95)
+
+
+class TestBootstrapPercentileCI:
+    def test_contains_point_estimate(self):
+        rng_vals = [0.1 * (i % 21) for i in range(120)]
+        p95 = stats.percentile(rng_vals, 95)
+        lo, hi = stats.bootstrap_percentile_ci(rng_vals, 95, iterations=400, seed=3)
+        assert lo <= p95 <= hi
+        assert lo < hi
+
+    def test_deterministic_given_seed(self):
+        vals = [float(i % 17) for i in range(60)]
+        a = stats.bootstrap_percentile_ci(vals, 95, iterations=200, seed=5)
+        b = stats.bootstrap_percentile_ci(vals, 95, iterations=200, seed=5)
+        assert a == b
+
+    def test_different_seed_different_interval(self):
+        vals = [float(i % 17) for i in range(60)]
+        a = stats.bootstrap_percentile_ci(vals, 95, iterations=200, seed=5)
+        b = stats.bootstrap_percentile_ci(vals, 95, iterations=200, seed=6)
+        assert a != b
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError):
+            stats.bootstrap_percentile_ci([], 95)
+
+
+class TestLatencyCostAggregation:
+    ROWS = (
+        {"case": "a", "passed": True, "score": 0.9,
+         "latency_ms": 100.0, "cost_usd": 0.001},
+        {"case": "a", "passed": True, "score": 0.8,
+         "latency_ms": 300.0, "cost_usd": 0.002},
+        {"case": "b", "passed": False, "score": 0.3,
+         "latency_ms": 200.0, "cost_usd": 0.001},
+        {"case": "b", "passed": True, "score": 0.7,
+         "latency_ms": 400.0, "cost_usd": 0.003},
+        {"case": "c", "passed": True},   # no latency/cost at all
+    )
+
+    def test_latency_stats(self):
+        agg = stats.aggregate(self.ROWS, k=1, base_seed=1, bootstrap_iterations=300)
+        assert agg.latency_rows == 4
+        assert agg.mean_latency_ms == pytest.approx(250.0)
+        # nearest-rank p50 of [100, 200, 300, 400] = 200 (lower middle)
+        assert agg.p50_latency_ms == pytest.approx(200.0)
+        assert agg.p95_latency_ms == pytest.approx(400.0)
+        assert agg.max_latency_ms == pytest.approx(400.0)
+        assert agg.mean_latency_ci[0] < agg.mean_latency_ci[1]
+        assert agg.p95_latency_ci[0] <= agg.p95_latency_ms <= agg.p95_latency_ci[1]
+        assert len(agg.latency_values) == 4
+
+    def test_cost_stats(self):
+        agg = stats.aggregate(self.ROWS, k=1, base_seed=1, bootstrap_iterations=300)
+        assert agg.cost_rows == 4
+        assert agg.total_cost_usd == pytest.approx(0.007, abs=1e-12)
+        assert agg.mean_cost_usd == pytest.approx(0.00175, abs=1e-12)
+        assert agg.total_cost_ci[0] < agg.total_cost_usd < agg.total_cost_ci[1]
+
+    def test_score_distribution(self):
+        agg = stats.aggregate(self.ROWS, k=1, base_seed=1, bootstrap_iterations=300)
+        # nearest-rank p50 of [0.3, 0.7, 0.8, 0.9] = 0.7 (lower middle)
+        assert agg.score_p50 == pytest.approx(0.7)
+        assert agg.score_p95 == pytest.approx(0.9)
+        assert agg.score_min == pytest.approx(0.3)
+        assert agg.score_max == pytest.approx(0.9)
+        assert len(agg.score_values) == 4
+
+    def test_metric_accessors(self):
+        agg = stats.aggregate(self.ROWS, k=1, base_seed=1, bootstrap_iterations=300)
+        assert agg.metric_value("p95_latency_ms") == pytest.approx(400.0)
+        assert agg.metric_value("total_cost_usd") == pytest.approx(0.007, abs=1e-12)
+        assert agg.metric_ci("p95_latency_ms") == agg.p95_latency_ci
+        assert agg.metric_ci("total_cost_usd") == agg.total_cost_ci
+        with pytest.raises(KeyError):
+            agg.metric_value("nope")
+        with pytest.raises(KeyError):
+            agg.metric_ci("nope")
+
+    def test_absent_latency_and_cost(self):
+        rows = [{"case": "a", "passed": True}, {"case": "a", "passed": False}]
+        agg = stats.aggregate(rows, k=1, base_seed=1, bootstrap_iterations=100)
+        assert agg.latency_rows == 0
+        assert agg.p95_latency_ms is None
+        assert agg.p95_latency_ci is None
+        assert agg.total_cost_usd is None
+        assert agg.total_cost_ci is None
+        assert agg.metric_value("p95_latency_ms") is None
+
+    def test_latency_deterministic(self):
+        a = stats.aggregate(self.ROWS, k=1, base_seed=11, bootstrap_iterations=300)
+        b = stats.aggregate(self.ROWS, k=1, base_seed=11, bootstrap_iterations=300)
+        assert a.p95_latency_ci == b.p95_latency_ci
+        assert a.total_cost_ci == b.total_cost_ci

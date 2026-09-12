@@ -1,24 +1,34 @@
 {
   "base_seed": 777001,
   "cases": 10,
-  "config_hash": "42f6baf954b4cec2",
-  "created": "2026-09-12T10:20:09+00:00",
-  "git_sha": "07c1a2194f7662793ccfc4247d5d07bedea99dc0",
+  "config_hash": "829b6af0ec9684ce",
+  "created": "2026-09-12T11:31:35+00:00",
+  "git_sha": "12d5e64d639f762a09c87908f5c61100477634ca",
   "metrics": {
     "mean_score": {
-      "high": 0.92665,
-      "low": 0.910872,
-      "value": 0.918849
+      "high": 0.927679,
+      "low": 0.912376,
+      "value": 0.920225
+    },
+    "p95_latency_ms": {
+      "high": 882.9,
+      "low": 844.9,
+      "value": 871.5
     },
     "pass_at_k_mean": {
-      "high": 0.970833,
-      "low": 0.866667,
-      "value": 0.920833
+      "high": 0.958333,
+      "low": 0.9,
+      "value": 0.929167
     },
     "pass_rate": {
-      "high": 0.948735,
-      "low": 0.879671,
-      "value": 0.920833
+      "high": 0.955308,
+      "low": 0.889502,
+      "value": 0.929167
+    },
+    "total_cost_usd": {
+      "high": 0.306336,
+      "low": 0.277505,
+      "value": 0.291607
     }
   },
   "repetitions": 24,

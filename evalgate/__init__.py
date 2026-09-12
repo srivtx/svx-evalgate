@@ -12,10 +12,24 @@ green-or-red check on the pull request:
 
 EvalGate does not compete with eval platforms - it connects them to the
 workflow engineers already trust.
+
+v2 adds: latency and cost statistics (p50/p95, totals, bootstrap CIs),
+upper-bound thresholds for them, a self-contained HTML report with
+inline SVG charts, run history with `evalgate trend`, and direction-aware
+regression bands (lower-is-better metrics).
 """
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 __all__ = [
-    "config", "stats", "runner", "baseline", "gate", "report", "github",
-    "cli", "init",
+    "baseline",
+    "cli",
+    "config",
+    "gate",
+    "github",
+    "history",
+    "htmlreport",
+    "init",
+    "report",
+    "runner",
+    "stats",
 ]

@@ -1,9 +1,10 @@
 name: 'SVX EvalGate'
 description: >-
   Deterministic statistics gate for AI evals: pass@k, bootstrap confidence
-  intervals, and regression bands against a committed baseline. One ordinary
-  green-or-red check on your pull request. Works with the eval suite you
-  already have - wrap it, don't replace it.
+  intervals, latency and cost statistics, and regression bands against a
+  committed baseline. One ordinary green-or-red check on your pull request,
+  with markdown and self-contained HTML reports. Works with the eval suite
+  you already have - wrap it, don't replace it.
 branding:
   icon: 'check-circle'
   color: 'green'

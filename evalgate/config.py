@@ -117,6 +117,9 @@ class GateConfig:
     k: int = 1
     min_pass_at_k: float = 0.85
     min_mean_score: float | None = None
+    # v2 thresholds: RED when the current run EXCEEDS these (None = skip).
+    max_p95_latency_ms: float | None = None
+    max_total_cost_usd: float | None = None
     regression: RegressionConfig = field(default_factory=RegressionConfig)
 
 
@@ -129,6 +132,20 @@ class BaselineConfig:
 @dataclass
 class ReportConfig:
     path: str = ".svx/report.md"
+    # Self-contained HTML report with inline SVG charts (v2).
+    # Set to null (~) to disable; written next to the markdown report
+    # by default and attached to the run artifact.
+    html_path: str | None = ".svx/report.html"
+
+
+@dataclass
+class HistoryConfig:
+    """Run history (v2): one JSON line per `evalgate run`, feeding the
+    trend command and the trend chart in the HTML report."""
+
+    enabled: bool = True
+    path: str = ".svx/history.jsonl"
+    max_entries: int = 500
 
 
 @dataclass
@@ -137,6 +154,7 @@ class Config:
     gate: GateConfig = field(default_factory=GateConfig)
     baseline: BaselineConfig = field(default_factory=BaselineConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
     source_path: Path | None = None
 
     def config_hash(self) -> str:
@@ -147,6 +165,8 @@ class Config:
             "k": self.gate.k,
             "min_pass_at_k": self.gate.min_pass_at_k,
             "min_mean_score": self.gate.min_mean_score,
+            "max_p95_latency_ms": self.gate.max_p95_latency_ms,
+            "max_total_cost_usd": self.gate.max_total_cost_usd,
             "regression": dataclasses.asdict(self.gate.regression),
         }
         blob = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -209,4 +229,10 @@ def load_config(path: Path) -> tuple[Config, list[str]]:
         raise ValueError("gate.regression.mode must be 'absolute' or 'relative'")
     if cfg.gate.regression.tolerance < 0:
         raise ValueError("gate.regression.tolerance must be >= 0")
+    if cfg.gate.max_p95_latency_ms is not None and cfg.gate.max_p95_latency_ms <= 0:
+        raise ValueError("gate.max_p95_latency_ms must be > 0")
+    if cfg.gate.max_total_cost_usd is not None and cfg.gate.max_total_cost_usd <= 0:
+        raise ValueError("gate.max_total_cost_usd must be > 0")
+    if cfg.history.max_entries < 1:
+        raise ValueError("history.max_entries must be >= 1")
     return cfg, warnings

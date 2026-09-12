@@ -11,6 +11,7 @@ gate:
   k: 1                                   # pass@k per case
   min_pass_at_k: 0.80                    # aggregate threshold (mean of per-case pass@k)
   min_mean_score: 0.60
+  max_p95_latency_ms: 1200               # v2: RED when p95 latency exceeds this
   regression:
     mode: absolute                       # "absolute" or "relative" (fraction of baseline)
     tolerance: 0.04                      # band around the baseline before a run goes red

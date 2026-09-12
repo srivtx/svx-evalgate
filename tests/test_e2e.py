@@ -7,7 +7,6 @@ headline claims:
   2. The gate actually catches a regression and turns red.
 """
 import json
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -168,3 +167,154 @@ class TestFullPipeline:
         proc = _evalgate(project, "version")
         assert proc.returncode == 0
         assert "svx-evalgate" in proc.stdout
+
+
+MOCK_EVALS_V2 = textwrap.dedent(
+    """
+    import json, os, random
+
+    CASES = [
+        ("sql-gen-basic", 0.98),
+        ("sql-gen-join", 0.93),
+        ("summarize-faithful", 0.91),
+        ("extract-entities", 0.96),
+    ]
+
+    regression = os.environ.get("DEMO_MODE") == "regression"
+    seed = int(os.environ.get("SVX_SEED", "0"))
+    rng = random.Random(seed)
+
+    for name, quality in CASES:
+        q = quality - 0.15 if regression else quality
+        passed = rng.random() < q
+        score = min(1.0, max(0.0, rng.gauss(q, 0.05)))
+        latency = rng.uniform(150.0, 900.0) * (1.8 if regression else 1.0)
+        cost = rng.uniform(0.0004, 0.0021) * (1.5 if regression else 1.0)
+        print(json.dumps({
+            "case": name, "passed": passed, "score": round(score, 4),
+            "latency_ms": round(latency, 1), "cost_usd": round(cost, 6),
+        }))
+    """
+)
+
+
+@pytest.fixture()
+def project_v2(tmp_path):
+    (tmp_path / "evals").mkdir()
+    (tmp_path / "evals" / "run_evals.py").write_text(MOCK_EVALS_V2, encoding="utf-8")
+    (tmp_path / "svx.evalgate.yaml").write_text(textwrap.dedent(
+        """
+        evals:
+          command: "python evals/run_evals.py"
+          repetitions: 16
+          base_seed: 555001
+          bootstrap_iterations: 1500
+
+        gate:
+          k: 1
+          min_pass_at_k: 0.80
+          max_p95_latency_ms: 1100
+          regression:
+            mode: absolute
+            tolerance: 0.05
+        """
+    ), encoding="utf-8")
+    return tmp_path
+
+
+class TestV2Pipeline:
+    def test_run_writes_markdown_html_and_history(self, project_v2):
+        proc = _evalgate(project_v2, "run", "--json")
+        assert proc.returncode == 0, proc.stderr
+        assert (project_v2 / ".svx" / "report.md").exists()
+        html_file = project_v2 / ".svx" / "report.html"
+        assert html_file.exists()
+        html = html_file.read_text(encoding="utf-8")
+        assert html.startswith("<!DOCTYPE html>")
+        assert "p95 latency" in html
+        assert "total cost" in html
+        assert "latency distribution" in html
+        assert html.count("<svg") >= 4
+        history_file = project_v2 / ".svx" / "history.jsonl"
+        assert history_file.exists()
+        entries = [json.loads(line) for line in
+                   history_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert len(entries) == 1
+        assert entries[0]["verdict"] == "GREEN"
+        assert entries[0]["p95_latency_ms"] > 0
+        assert entries[0]["total_cost_usd"] > 0
+        # --json carries the v2 metrics
+        doc = json.loads(proc.stdout)
+        assert doc["green"] is True
+        assert doc["metrics"]["p95_latency_ms"] > 0
+        assert doc["metrics"]["total_cost_usd"] > 0
+        assert doc["metrics"]["p95_latency_ci"][0] <= doc["metrics"]["p95_latency_ms"]
+
+    def test_history_grows_and_trend_reports(self, project_v2):
+        for _ in range(3):
+            proc = _evalgate(project_v2, "run")
+            assert proc.returncode == 0, proc.stderr
+        proc = _evalgate(project_v2, "trend")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        out = proc.stdout
+        assert "last 3 of 3 run(s)" in out
+        assert "GREEN" in out
+        assert "sparkline" in out
+
+    def test_latency_threshold_trips_red(self, project_v2):
+        proc = _evalgate(project_v2, "run", "--update-baseline")
+        assert proc.returncode == 0, proc.stderr
+        proc = _evalgate(project_v2, "run",
+                         env_extra={"DEMO_MODE": "regression"})
+        assert proc.returncode == 1, proc.stderr
+        assert "verdict: RED" in proc.stderr
+        report = (project_v2 / ".svx" / "report.md").read_text(encoding="utf-8")
+        assert "P95 latency" in report
+        html = (project_v2 / ".svx" / "report.html").read_text(encoding="utf-8")
+        assert "Why this run is RED" in html
+
+    def test_trend_empty_history_is_clean_error(self, project_v2):
+        proc = _evalgate(project_v2, "trend")
+        assert proc.returncode == 2
+        assert "no history" in proc.stderr
+
+    def test_baseline_reset(self, project_v2):
+        _evalgate(project_v2, "run", "--update-baseline")
+        assert (project_v2 / ".svx" / "baseline.json").exists()
+        proc = _evalgate(project_v2, "baseline", "reset")
+        assert proc.returncode == 0, proc.stderr
+        assert "baseline removed" in proc.stderr
+        assert not (project_v2 / ".svx" / "baseline.json").exists()
+        # reset again: graceful no-op
+        proc = _evalgate(project_v2, "baseline", "reset")
+        assert proc.returncode == 0
+        assert "nothing to reset" in proc.stderr
+
+    def test_baseline_show_still_works(self, project_v2):
+        _evalgate(project_v2, "run", "--update-baseline")
+        proc = _evalgate(project_v2, "baseline")
+        assert proc.returncode == 0
+        doc = json.loads(proc.stdout)
+        assert "p95_latency_ms" in doc["metrics"]
+        assert doc["metrics"]["p95_latency_ms"]["value"] > 0
+
+    def test_html_disabled(self, project_v2):
+        cfg = project_v2 / "svx.evalgate.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8") +
+                       "report:\n  path: .svx/report.md\n  html_path: ~\n",
+                       encoding="utf-8")
+        proc = _evalgate(project_v2, "run")
+        assert proc.returncode == 0, proc.stderr
+        assert not (project_v2 / ".svx" / "report.html").exists()
+        assert (project_v2 / ".svx" / "report.md").exists()
+
+    def test_history_disabled(self, project_v2):
+        cfg = project_v2 / "svx.evalgate.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8") +
+                       "history:\n  enabled: false\n", encoding="utf-8")
+        proc = _evalgate(project_v2, "run")
+        assert proc.returncode == 0, proc.stderr
+        assert not (project_v2 / ".svx" / "history.jsonl").exists()
+        # html still renders, with empty trend
+        html = (project_v2 / ".svx" / "report.html").read_text(encoding="utf-8")
+        assert "first run on record" in html

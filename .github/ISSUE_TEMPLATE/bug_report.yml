@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in EvalGate behaved incorrectly
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the incorrect behavior. Include the exact command you ran.
+      placeholder: |
+        evalgate run --config svx.evalgate.yaml
+        exit code 1 with reason "pass@1 mean 0.792 < threshold 0.800" although ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: The behavior you believe is correct, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Config file + a tiny eval emitter that reproduces the issue (10 lines is usually enough).
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: EvalGate version
+      description: Output of `evalgate version`
+      placeholder: svx-evalgate 2.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where did it run?
+      options:
+        - Local (laptop / server)
+        - GitHub Actions (evalgate CLI)
+        - GitHub Actions (composite action)
+        - Other CI
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: stderr lines from the run (secrets redacted).
+      render: shell

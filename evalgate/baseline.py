@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import subprocess
 from pathlib import Path
 
 SCHEMA_VERSION = 1
 
 # Metrics persisted in the baseline and compared by the regression gate.
-TRACKED_METRICS = ("pass_at_k_mean", "pass_rate", "mean_score")
+# v2 adds the lower-is-better pair; baselines recorded by older versions
+# simply lack those entries and the gate skips them (no breakage).
+TRACKED_METRICS = (
+    "pass_at_k_mean", "pass_rate", "mean_score",
+    "p95_latency_ms", "total_cost_usd",
+)
 
 
 def _git_sha() -> str | None:

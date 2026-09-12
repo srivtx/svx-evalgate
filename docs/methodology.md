@@ -105,3 +105,52 @@ framework, the model, the judging — stays yours.
 - It does not require a fixed eval count: statistics degrade gracefully
   (wider intervals) with fewer runs, and the gate's conservatism scales
   with the honesty of the data.
+
+## Latency and cost statistics (v2)
+
+**Percentiles.** Latency percentiles use the nearest-rank definition: for
+`n` observations and target `q`, report the `ceil(q/100 * n)`-th smallest
+value. This is deliberately not an interpolating percentile: a sort and an
+index produce bit-identical results on every platform, which matters
+because the gate's promise is determinism. On even `n`, the median is the
+lower middle element - a documented choice, not an accident.
+
+**Percentile confidence intervals.** The bootstrap CI for p95 resamples
+rows with replacement, recomputes the percentile, and takes the 2.5th and
+97.5th percentiles of the resampled statistics. Each resample costs a
+sort, so iterations are capped at `min(bootstrap_iterations, 2000)` - the
+seed still derives from SHA-256 of `(base_seed, "p95_latency_ms")`, so
+the interval is exactly reproducible.
+
+**Cost.** Total cost is the plain row sum. Its interval bootstraps the
+per-row mean (the natural estimand) and scales the resulting bounds by the
+row count. Mean-of-rows and sum-times-n carry the same information; the
+sum is what the threshold gates on and what a budget owner reads.
+
+**Direction-aware regression.** For rates and scores, worse means lower,
+and REGRESSION fires when the current interval lies entirely below the
+baseline interval minus the band. For `p95_latency_ms` and
+`total_cost_usd`, worse means *higher*, so the comparison inverts:
+REGRESSION when the current interval lies entirely above the baseline
+interval plus the band. Overlap remains PASS in both directions - the
+anti-flake guarantee is symmetric: noise cannot separate two intervals
+from the same distribution, in either direction.
+
+**History.** Each run appends one JSON line (timestamp, git SHA, verdict,
+core metrics). The file is bounded (`history.max_entries`, oldest
+trimmed) and never gates anything - it exists to answer "is the system
+drifting?" over weeks, which a single baseline cannot. The HTML report
+plots it; the CLI prints it. It is per-machine state like the report:
+never commit it, never trust it as evidence - the baseline is the
+reference.
+
+## The HTML report
+
+The report is a single HTML file with inline SVG and no external
+resources (no fonts, scripts, stylesheets, or images), so it renders
+identically in a browser tab, from `file://`, and inside CI artifact
+zips. Every chart is generated deterministically from the run's
+statistics; case names are HTML-escaped (the test suite feeds it
+script-tag and attribute-injection payloads); numbers use tabular
+figures. The only non-deterministic string anywhere in the file is the
+generation timestamp in the footer.

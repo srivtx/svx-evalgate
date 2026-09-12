@@ -18,7 +18,6 @@ from evalgate.stats import (
     wilson_interval,
 )
 
-
 # --- pass@k -----------------------------------------------------------------
 
 @pytest.mark.parametrize("n,c,k", [

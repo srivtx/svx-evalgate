@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a metric, gate mode, or integration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The eval/CI pain you are hitting today (before proposing the solution).
+      placeholder: |
+        Our gate flakes when the eval suite grows: the bootstrap CI on
+        mean_score is wider than our regression tolerance...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What should EvalGate do?
+      description: The behavior you want. Metric names, config keys, and report output all help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other tools or workarounds you tried and why they fall short.
+  - type: checkboxes
+    id: stats
+    attributes:
+      label: Statistical ground (for metric/gate proposals)
+      options:
+        - label: This needs a well-defined estimator (paper or standard method)
+        - label: This is a workflow/UX change, not a statistics change
+        - label: Not sure - open to design discussion

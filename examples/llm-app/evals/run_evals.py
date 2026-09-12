@@ -39,10 +39,16 @@ def main() -> None:
         q = quality - 0.15 if regression else quality
         passed = rng.random() < q
         score = min(1.0, max(0.0, rng.gauss(q, 0.05)))
+        # v2 demo fields: latency and cost per row. Regression mode also
+        # inflates latency so `max_p95_latency_ms` trips alongside quality.
+        latency = rng.uniform(150.0, 900.0) * (1.6 if regression else 1.0)
+        cost = rng.uniform(0.0004, 0.0021) * (1.5 if regression else 1.0)
         print(json.dumps({
             "case": name,
             "passed": passed,
             "score": round(score, 4),
+            "latency_ms": round(latency, 1),
+            "cost_usd": round(cost, 6),
             "meta": {"seed": seed, "mode": "regression" if regression else "normal"},
         }))
 

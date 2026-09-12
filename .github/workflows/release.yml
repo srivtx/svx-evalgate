@@ -34,8 +34,35 @@ jobs:
           evalgate run
           evalgate version
 
+      - name: 'Upload distributions'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
       - name: 'Attach artifacts to GitHub Release'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+  # Opt-in PyPI publication via trusted publishing:
+  #   1. create the repository variable PUBLISH_TO_PYPI=true
+  #      (Settings > Secrets and variables > Actions > Variables)
+  #   2. configure the trusted publisher for svx-evalgate on pypi.org
+  #      (Pending publisher: owner srivtx, repo svx-evalgate, workflow release.yml)
+  publish:
+    needs: build
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # OIDC token for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: 'Publish to PyPI'
+        uses: pypa/gh-action-pypi-publish@release/v1
