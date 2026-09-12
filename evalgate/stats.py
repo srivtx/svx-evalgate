@@ -37,14 +37,20 @@ def pass_at_k(n: int, c: int, k: int) -> float:
 # Wilson score interval - closed-form CI for a pass rate
 # ---------------------------------------------------------------------------
 def wilson_interval(passes: int, total: int, z: float = 1.96) -> tuple[float, float]:
-    """95% (z=1.96) Wilson score interval for a binomial proportion."""
+    """95% (z=1.96) Wilson score interval for a binomial proportion.
+
+    The interval is mathematically confined to [0, 1]; the final clamp
+    removes floating-point overshoot (e.g. 1.0000000000000002).
+    """
     if total <= 0:
         return 0.0, 1.0
     p = passes / total
     denom = 1.0 + z * z / total
     centre = p + z * z / (2.0 * total)
     margin = z * math.sqrt(p * (1.0 - p) / total + z * z / (4.0 * total * total))
-    return ((centre - margin) / denom, (centre + margin) / denom)
+    lo = max(0.0, (centre - margin) / denom)
+    hi = min(1.0, (centre + margin) / denom)
+    return lo, hi
 
 
 # ---------------------------------------------------------------------------

@@ -2,11 +2,14 @@
 
 **Deterministic statistics for non-deterministic software.** EvalGate wraps the eval suite you already run and turns its flaky output into one ordinary, trustworthy **green-or-red check on your pull request**.
 
-![SVX](https://img.shields.io/badge/SVX-EvalGate-298959?style=flat-square)
-![version](https://img.shields.io/badge/version-1.0.0-4fbb85?style=flat-square)
-![tests](https://img.shields.io/badge/tests-59%20passing-456454?style=flat-square)
-![deps](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-77817c?style=flat-square)
-![license](https://img.shields.io/badge/license-MIT-298959?style=flat-square)
+![SVX](https://img.shields.io/badge/SVX-EvalGate-1d9459?style=flat-square)
+![version](https://img.shields.io/badge/version-1.1.0-40c884?style=flat-square)
+![tests](https://img.shields.io/badge/tests-108%20passing-2f5140?style=flat-square)
+![deps](https://img.shields.io/badge/dependencies-zero%20(stdlib%20only)-747d78?style=flat-square)
+![typed](https://img.shields.io/badge/typed-PEP%20561-388860?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-1d9459?style=flat-square)
+
+[![CI](https://github.com/srivtx/svx-evalgate/actions/workflows/ci.yml/badge.svg)](https://github.com/srivtx/svx-evalgate/actions/workflows/ci.yml)
 
 ---
 
@@ -18,7 +21,7 @@ Your LLM feature shipped with evals. Your team wrote them, ran them in a noteboo
 - Somebody rewrites a prompt in a PR. The evals run once, come back green, and merge - because one sample of a non-deterministic system says nothing.
 - Someone asks "is the model *better* than last month?" There is no answer, because nothing was ever recorded.
 
-This is the gap SVX Research ranked **#1 of twelve** validated opportunities in the [SVX Industry Gap Analysis 2025-2026](https://github.com/svx/research): eval platforms monetize dashboards and judge-token spend, so none of them is structurally motivated to make the CI gate itself excellent. The field is empty at exactly the moment every team is shipping AI features - **362 documented AI incidents in 2025, up from 233 the year before, while enterprise LLM spend doubled in six months.**
+This is the gap SVX Research ranked **#1 of twelve** validated opportunities in the [SVX Industry Gap Analysis 2025-2026](https://github.com/srivtx/svx-research): eval platforms monetize dashboards and judge-token spend, so none of them is structurally motivated to make the CI gate itself excellent. The field is empty at exactly the moment every team is shipping AI features - **362 documented AI incidents in 2025, up from 233 the year before, while enterprise LLM spend doubled in six months.**
 
 ## What EvalGate does
 
@@ -42,6 +45,17 @@ This is the gap SVX Research ranked **#1 of twelve** validated opportunities in 
 | **Plays well with others** | EvalGate does not host your evals, judge them, or store them. It is not another platform. It connects whatever you already run to the workflow engineers already trust. |
 
 ## Quickstart
+
+**Zero-to-gated in four commands** - scaffold a config and a runnable demo suite, then let the statistics do the talking:
+
+```bash
+pip install svx-evalgate
+evalgate init                  # writes svx.evalgate.yaml + evals/run_evals.py
+evalgate run --update-baseline # first run: record what good looks like
+evalgate run                   # every run after: gate against it
+```
+
+Or wire an existing suite by hand:
 
 **1. Wrap your eval suite.** Make your runner print one JSON object per line per invocation:
 
@@ -71,12 +85,13 @@ gate:
 **3. Install and run locally** (same verdict as CI, because seeds):
 
 ```bash
-pip install svx-evalgate      # or: pip install git+https://github.com/svx/evalgate
+pip install svx-evalgate      # or: pip install git+https://github.com/srivtx/svx-evalgate
 evalgate run --update-baseline   # first run: record what good looks like
 evalgate run                     # every run after: gate against it
+evalgate run --json              # machine-readable verdict for bots and dashboards
 ```
 
-Exit codes: `0` green · `1` red (threshold or regression) · `2` error.
+Exit codes: `0` green · `1` red (threshold or regression) · `2` error. Add `--json` for a machine-readable document (verdict, reasons, every metric with its confidence interval, failing cases, baseline state) — for non-GitHub CI systems, dashboards, or chat bots that post the gate result.
 
 **4. Gate your pull requests** - `.github/workflows/evalgate.yml`:
 
@@ -94,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: svx/evalgate@v1          # the action installs and runs the gate
+      - uses: srivtx/svx-evalgate@v1     # the action installs and runs the gate
         with:
           update-baseline: ${{ github.ref == 'refs/heads/main' }}
 ```
@@ -184,19 +199,25 @@ JSON configs (`svx.evalgate.json`) are supported natively. The YAML subset parse
 ## Repository layout
 
 ```
-evalgate/            the package (config, runner, stats, baseline, gate, report, github, cli)
-tests/               54 tests: stats closed-form checks, gate logic, config/runner, full e2e
+evalgate/            the package (config, runner, stats, baseline, gate, report, github, init, cli)
+tests/               108 tests: statistics property tests, gate logic, config/runner, full e2e
 examples/llm-app/    complete demo: seeded mock suite + config + regression walkthrough
 action.yml           GitHub Action (composite, installs and runs the gate)
-.github/workflows/   ci.yml (tests + self-checks) and evalgate.yml (dogfooding)
+docs/methodology.md  the statistics, precisely: pass@k, Wilson, seeded bootstrap, interval-vs-interval
+.github/workflows/   ci.yml (tests + self-checks), evalgate.yml (dogfooding), release.yml
+CHANGELOG.md         every user-visible change, per release
+CONTRIBUTING.md      ground rules (determinism is the product)
+SECURITY.md          reporting and scope
 ```
 
 ## Origin
 
-EvalGate builds **gap #1** of the [SVX Industry Gap Analysis 2025-2026](https://github.com/svx/research): the evals-in-CI adapter - "the sharpest unmet need found in the entire research," ranked first of twelve opportunities by evidence strength, openness of the field, and realism of a small-team distribution model. The research repo contains the full evidence base: 362 documented AI incidents in 2025, the collapse of manual verification under AI code volume, and the structural reasons the incumbent platforms will not build this themselves.
+EvalGate builds **gap #1** of the [SVX Industry Gap Analysis 2025-2026](https://github.com/srivtx/svx-research): the evals-in-CI adapter - "the sharpest unmet need found in the entire research," ranked first of twelve opportunities by evidence strength, openness of the field, and realism of a small-team distribution model. The research repo contains the full evidence base: 362 documented AI incidents in 2025, the collapse of manual verification under AI code volume, and the structural reasons the incumbent platforms will not build this themselves.
 
 ## Roadmap
 
+- [x] `evalgate init` scaffolding (v1.1.0)
+- [x] `--json` machine-readable output (v1.1.0)
 - [ ] JUnit-XML and pytest report adapters (zero-wrapper ingestion)
 - [ ] `evalgate diff` - compare two baselines at the command line
 - [ ] Cost dimensions: token spend per case alongside pass@k

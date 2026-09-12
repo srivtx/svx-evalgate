@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "svx-evalgate"
-version = "1.0.0"
+version = "1.1.0"
 description = "SVX EvalGate - deterministic statistics gate for AI evals in CI: pass@k, bootstrap confidence intervals, and regression bands against stored baselines. Green or red on your pull request."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,8 +28,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/svx/evalgate"
-Research = "https://github.com/svx/research"
+Homepage = "https://github.com/srivtx/svx-evalgate"
+Research = "https://github.com/srivtx/svx-research"
+Issues = "https://github.com/srivtx/svx-evalgate/issues"
+Changelog = "https://github.com/srivtx/svx-evalgate/blob/main/CHANGELOG.md"
 
 [project.scripts]
 evalgate = "evalgate.cli:main"
@@ -39,6 +41,9 @@ dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 include = ["evalgate*"]
+
+[tool.setuptools.package-data]
+evalgate = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

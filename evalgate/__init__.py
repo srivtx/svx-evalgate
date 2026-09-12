@@ -14,8 +14,8 @@ EvalGate does not compete with eval platforms - it connects them to the
 workflow engineers already trust.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "config", "stats", "runner", "baseline", "gate", "report", "github",
-    "cli",
+    "cli", "init",
 ]

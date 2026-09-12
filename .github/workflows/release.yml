@@ -1,0 +1,41 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 'Verify test suite before packaging'
+        run: |
+          pip install --quiet .[dev]
+          pytest
+
+      - name: 'Build distributions'
+        run: |
+          pip install --quiet build
+          python -m build
+
+      - name: 'Smoke: install the wheel and run the gate'
+        run: |
+          pip install --quiet dist/*.whl
+          cd examples/llm-app
+          evalgate run
+          evalgate version
+
+      - name: 'Attach artifacts to GitHub Release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

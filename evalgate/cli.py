@@ -1,7 +1,8 @@
 """EvalGate command-line interface.
 
-    evalgate run [--config PATH] [--update-baseline] [--report-stdout]
+    evalgate run [--config PATH] [--update-baseline] [--report-stdout] [--json]
     evalgate baseline [--config PATH]          # print the current baseline
+    evalgate init [DIR]                        # scaffold a gated eval suite
     evalgate version
 
 Exit codes: 0 = green, 1 = red (threshold or regression), 2 = error.
@@ -19,6 +20,7 @@ from . import baseline as baseline_mod
 from . import config as config_mod
 from . import gate as gate_mod
 from . import github as github_mod
+from . import init as init_mod
 from . import report as report_mod
 from . import runner as runner_mod
 from . import stats as stats_mod
@@ -100,6 +102,32 @@ def cmd_run(args) -> int:
     if args.report_stdout:
         print(markdown)
 
+    if args.json:
+        machine = {
+            "version": __version__,
+            "green": gate_result.green,
+            "verdict": "GREEN" if gate_result.green else "RED",
+            "reasons": gate_result.reasons(),
+            "metrics": {
+                "pass_at_k_mean": agg.pass_at_k_mean,
+                "pass_at_k_ci": (list(agg.pass_at_k_ci)
+                                  if agg.pass_at_k_ci else None),
+                "pass_rate": agg.pass_rate,
+                "pass_rate_ci": (list(agg.pass_rate_ci)
+                                 if agg.pass_rate_ci else None),
+                "mean_score": agg.mean_score,
+                "mean_score_ci": (list(agg.mean_score_ci)
+                                  if agg.mean_score_ci else None),
+            },
+            "total_runs": agg.total_runs,
+            "total_passes": agg.total_passes,
+            "failing_cases": agg.failing_cases,
+            "baseline_used": baseline is not None,
+            "baseline_updated": bool(update),
+            "report_path": str(report_path),
+        }
+        print(json.dumps(machine, indent=2, sort_keys=True))
+
     verdict = "GREEN" if gate_result.green else "RED"
     _log(f"verdict: {verdict}")
     for reason in gate_result.reasons():
@@ -124,6 +152,24 @@ def cmd_version(_args) -> int:
     return EXIT_GREEN
 
 
+def cmd_init(args) -> int:
+    target = Path(getattr(args, "directory", None) or ".").resolve()
+    if not target.exists():
+        target.mkdir(parents=True, exist_ok=True)
+    created = init_mod.init_project(target)
+    if not created:
+        _log("nothing to do: svx.evalgate.yaml and evals/run_evals.py already exist")
+        return EXIT_GREEN
+    for path in created:
+        print(f"created: {path}")
+    print("\nnext steps:")
+    print("  1. edit svx.evalgate.yaml (command, thresholds, k)")
+    print("  2. python evals/run_evals.py   # sanity-check your emitter")
+    print("  3. evalgate run               # first run writes the baseline")
+    print("  4. evalgate run               # second run gates against it")
+    return EXIT_GREEN
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="evalgate",
@@ -137,14 +183,23 @@ def build_parser() -> argparse.ArgumentParser:
                        help="write a new baseline after the run (use on pushes to main)")
     p_run.add_argument("--report-stdout", action="store_true",
                        help="print the markdown report to stdout")
+    p_run.add_argument("--json", action="store_true",
+                       help="print a machine-readable result document to stdout")
     p_run.set_defaults(func=cmd_run)
 
     p_base = sub.add_parser("baseline", help="print the current baseline document")
     p_base.add_argument("--config", help="path to svx.evalgate.yaml / .json")
     p_base.set_defaults(func=cmd_baseline)
 
+    p_init = sub.add_parser("init", help="scaffold svx.evalgate.yaml + evals/run_evals.py")
+    p_init.add_argument("directory", nargs="?", default=".",
+                        help="target directory (default: current)")
+    p_init.set_defaults(func=cmd_init)
+
     p_ver = sub.add_parser("version", help="print the version")
     p_ver.set_defaults(func=cmd_version)
+    parser.add_argument("--version", action="version",
+                        version=f"svx-evalgate {__version__}")
     return parser
 
 
