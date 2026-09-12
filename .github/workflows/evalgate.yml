@@ -21,7 +21,8 @@ jobs:
       - name: 'SVX EvalGate'
         uses: ./
         with:
-          config: examples/llm-app/svx.evalgate.yaml
+          # config resolves against working-directory
+          config: svx.evalgate.yaml
           working-directory: examples/llm-app
           update-baseline: ${{ github.ref == 'refs/heads/main' }}
 
