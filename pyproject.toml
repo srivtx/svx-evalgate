@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "svx-evalgate"
+version = "1.0.0"
+description = "SVX EvalGate - deterministic statistics gate for AI evals in CI: pass@k, bootstrap confidence intervals, and regression bands against stored baselines. Green or red on your pull request."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "SVX Research" }]
+keywords = [
+    "llm", "evals", "evaluation", "ci", "continuous-integration",
+    "pass-at-k", "regression-testing", "ai", "testing", "github-action",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/svx/evalgate"
+Research = "https://github.com/svx/research"
+
+[project.scripts]
+evalgate = "evalgate.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["evalgate*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

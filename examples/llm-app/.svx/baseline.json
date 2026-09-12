@@ -1,0 +1,27 @@
+{
+  "base_seed": 777001,
+  "cases": 10,
+  "config_hash": "42f6baf954b4cec2",
+  "created": "2026-09-12T10:20:09+00:00",
+  "git_sha": "07c1a2194f7662793ccfc4247d5d07bedea99dc0",
+  "metrics": {
+    "mean_score": {
+      "high": 0.92665,
+      "low": 0.910872,
+      "value": 0.918849
+    },
+    "pass_at_k_mean": {
+      "high": 0.970833,
+      "low": 0.866667,
+      "value": 0.920833
+    },
+    "pass_rate": {
+      "high": 0.948735,
+      "low": 0.879671,
+      "value": 0.920833
+    }
+  },
+  "repetitions": 24,
+  "schema_version": 1,
+  "tool": "svx-evalgate"
+}

@@ -1,0 +1,49 @@
+name: 'SVX EvalGate'
+description: >-
+  Deterministic statistics gate for AI evals: pass@k, bootstrap confidence
+  intervals, and regression bands against a committed baseline. One ordinary
+  green-or-red check on your pull request. Works with the eval suite you
+  already have - wrap it, don't replace it.
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  config:
+    description: 'Path to the EvalGate config (svx.evalgate.yaml or .json)'
+    required: false
+    default: 'svx.evalgate.yaml'
+  update-baseline:
+    description: >-
+      Write a fresh baseline after the run. Set this on pushes to the
+      default branch; pull requests are then gated against that baseline.
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Directory containing the eval project (config path resolves against it)'
+    required: false
+    default: '.'
+  python-version:
+    description: 'Python version for the gate run'
+    required: false
+    default: '3.12'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Set up Python'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: 'Install SVX EvalGate'
+      shell: bash
+      run: pip install --quiet --no-input "${{ github.action_path }}"
+
+    - name: 'Run EvalGate'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        EVALGATE_UPDATE_BASELINE: ${{ inputs.update-baseline }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: evalgate run --config "${{ inputs.config }}"

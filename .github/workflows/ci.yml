@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 'Smoke: install + version'
+        run: |
+          pip install --quiet .[dev]
+          evalgate version
+      - name: 'Unit + end-to-end tests'
+        run: pytest -v
+
+      - name: 'Self-check: green path'
+        working-directory: examples/llm-app
+        run: |
+          evalgate run --update-baseline
+          evalgate run
+
+      - name: 'Self-check: regression path must fail'
+        working-directory: examples/llm-app
+        env:
+          DEMO_MODE: regression
+        run: |
+          set +e
+          evalgate run
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "expected exit 1 (RED) under DEMO_MODE=regression, got $code"
+            exit 1
+          fi
+          echo "regression correctly detected (exit 1)"

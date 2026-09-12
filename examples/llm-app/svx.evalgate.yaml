@@ -1,0 +1,23 @@
+# SVX EvalGate configuration for the llm-app example.
+# Docs: README.md in the repository root.
+
+evals:
+  command: "python evals/run_evals.py"   # your eval suite, wrapped to emit JSONL
+  repetitions: 24                        # runs per gate evaluation
+  base_seed: 777001                      # SVX_SEED = base_seed + repetition index
+  bootstrap_iterations: 2000
+
+gate:
+  k: 1                                   # pass@k per case
+  min_pass_at_k: 0.80                    # aggregate threshold (mean of per-case pass@k)
+  min_mean_score: 0.60
+  regression:
+    mode: absolute                       # "absolute" or "relative" (fraction of baseline)
+    tolerance: 0.04                      # band around the baseline before a run goes red
+
+baseline:
+  path: .svx/baseline.json               # committed to the repo, refreshed on main
+  auto_write_on_missing: false
+
+report:
+  path: .svx/report.md
