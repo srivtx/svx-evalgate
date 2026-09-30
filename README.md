@@ -299,6 +299,9 @@ docs/gitlab-ci.md    v2.1: GitLab CI recipe with JUnit reports and baseline refr
 docs/assets/         screenshots of the HTML report (green and red)
 .github/workflows/   ci.yml (lint + tests w/ coverage gate + self-checks),
                      evalgate.yml (dogfooding), release.yml (build + opt-in PyPI)
+AGENTS.md            agent onboarding — invariants, commands, conventions
+AGENT-GOALS.md       open goals as self-contained work orders (PyPI,
+                     adapters, evalgate why, maturation criteria)
 CHANGELOG.md         every user-visible change, per release
 CONTRIBUTING.md      ground rules (determinism is the product)
 SECURITY.md          reporting and scope

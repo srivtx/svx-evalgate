@@ -5,6 +5,11 @@ repository. **Read this file before changing anything.** It encodes the
 project's intent, its non-negotiable invariants, and the decisions that
 look unusual but are deliberate.
 
+**Open goals live in [`AGENT-GOALS.md`](AGENT-GOALS.md)** — each is a
+self-contained work order with full context (PyPI publication, Go/Jest/
+vitest ingestion adapters, `evalgate why`, maturation criteria). Pick
+one up there; record completions in its "Shipped" table.
+
 ## What this project is
 
 EvalGate is a deterministic statistics gate for AI evals in CI. It wraps
