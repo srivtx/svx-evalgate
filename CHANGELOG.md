@@ -8,6 +8,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Goal 6 — provider-axis portability (`evalgate portability`)** added
+  to `AGENT-GOALS.md`: a self-contained work order for the cross-model
+  "swap check" (per-provider baselines + direction-aware portability
+  diff in CI), handed off from SVX research track R11 (2026-09-30),
+  which verified that request-format portability is closed (gateways,
+  MCP, promptfoo) while behavior portability has no owner. Docs only —
+  no code change, no version bump.
 - **`AGENTS.md`** — onboarding context for AI coding agents and new
   contributors: project intent, the six non-negotiable invariants
   (determinism, interval-vs-interval comparison, direction-aware

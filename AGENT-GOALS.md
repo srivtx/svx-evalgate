@@ -209,8 +209,70 @@ leave the version alone.
 
 ---
 
+## Goal 6 — Provider-axis portability: `evalgate portability`
+
+**Why this goal exists.** SVX research track R11 (2026-09-30,
+[report](https://github.com/srivtx/svx-research/blob/main/research/track-reports/R11-model-portability.md))
+verified that LLM request-format portability is a closed, crowded
+category — gateways (LiteLLM, OpenRouter, Portkey, Cloudflare), MCP,
+and promptfoo killed it — but **behavior portability is not solved and
+has no owner**: "OpenAI-compatible ≠ interchangeable — test the actual
+failure modes per provider" (aiwisdom.dev, Jul 2026). Agent performance
+is scaffold-shaped, not model-shaped (searcharxiv, Aug 2026), so public
+leaderboards cannot answer "does *my* agent survive a model swap?"
+Eval platforms have started monetizing exactly this gate ($1.50/1000
+scores, beri.net Aug 2026) — the same structural opening that produced
+EvalGate, along a provider axis. **This is EvalGate's home ground** —
+deterministic per-case interval statistics, baselines, and
+`evalgate diff` — extended from the time axis to the provider axis.
+
+**Context.** v2.1.0 already has every primitive needed: named baselines
+(`.svx/baseline.json`), direction-aware interval-vs-interval comparison,
+`evalgate diff` with an all-worse/all-better table and exit codes. The
+extension is conceptually: run the *same* eval suite against N providers
+(or N models), store one baseline per provider, then diff across the
+provider axis instead of the time axis.
+
+**Work order:**
+
+1. **Input contract.** The user's existing eval harness produces
+   per-provider result files (JUnit XML / pytest JSON / Go / Jest rows
+   — Goal 2 adapters). EvalGate never makes network calls: it only
+   reads artifacts, so provider identity arrives as a label
+   (`--provider claude-sonnet`, `--provider gpt-5`), not an API call.
+   Determinism invariant unchanged.
+2. **`evalgate portability --baseline-provider A --candidate-provider B`**
+   (name is a proposal — pick the clearest): per-case
+   interval-vs-interval comparison of B's run against A's baseline,
+   the existing direction-aware verdicts, and a portability diff table
+   (which cases degrade when swapping A→B, which hold, which improve —
+   the `evalgate diff` table with provider columns).
+3. **Exit-code contract** (invariant #5): 0 = no case degrades beyond
+   tolerance, 1 = at least one case degrades. CI usage: the swap check
+   — "if we move provider, does the gate go red?" — as a PR artifact.
+4. **Baselines:** one baseline file per provider label under `.svx/`
+   (`.svx/baseline.claude-sonnet.json` — shape is a naming convention
+   over the existing baseline object, not a new format).
+5. Tests first, per house rules: fixture with two providers' rows →
+   correct per-case portability table; identical rows → all-hold;
+   degraded rows → exit 1 with the right rows named; determinism
+   (same input → byte-identical output).
+6. Docs: a `docs/portability.md` walking the swap-check workflow;
+   README gains the provider-axis story in one paragraph.
+7. **Versioning:** this is a new capability → part of the 2.2.0 batch
+   or its own 2.x minor (owner's call; default: after the Goal 2-3
+   batch, so 2.3.0).
+
+**Acceptance criteria:** swap-check demo runs green on GitHub CI using
+fixtures from two "providers"; portability diff table present in text
+and HTML reports; tests ≥ 264 + new; ruff + mypy clean; zero runtime
+deps still true; R11's evidence trail linked in the docs; one minor
+bump maximum for the capability.
+
+---
+
 ## Shipped goals (append with commit SHA when a goal completes)
 
 | Goal | Shipped in | Notes |
 |------|-----------|-------|
-| — | — | none yet — Goals 1-3 are open |
+| — | — | none yet — Goals 1-3, 6 are open |
