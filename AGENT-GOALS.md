@@ -269,6 +269,18 @@ and HTML reports; tests ≥ 264 + new; ruff + mypy clean; zero runtime
 deps still true; R11's evidence trail linked in the docs; one minor
 bump maximum for the capability.
 
+**Evidence addendum (research track V4, 2026-10-04):** deprecation
+visibility is being absorbed *per-platform* — Fiddler's LLM Gateway
+surfaces deprecation cues in model pickers (docs.fiddler.ai), Tencent
+exposes pending-deprecation status (Sep 16 2026), Salesforce documents
+model-deprecation/rerouting — but the **cross-vendor** slice (a
+standalone tracker + version-pinned canary evals that tell you what
+*your* agent loses when a model retires) remains unsurfaced. If the
+portability capability lands (2.2/2.3), a natural follow-on is
+`evalgate portability --frozen-baseline` — the "Renovate for models"
+shape the research flagged — but that is a separate capability with
+its own work order, not part of this goal.
+
 ---
 
 ## Shipped goals (append with commit SHA when a goal completes)

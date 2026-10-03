@@ -6,6 +6,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Goal 6 evidence addendum (2026-10-04): research track V4 — model
+  deprecation visibility being absorbed per-platform; cross-vendor
+  frozen-baseline slice unsurfaced (noted as a possible future
+  capability after portability). Docs-only, no bump.
+
 ### Added
 
 - **Goal 6 — provider-axis portability (`evalgate portability`)** added
